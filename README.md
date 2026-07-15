@@ -4,9 +4,23 @@ Touch-first tactical game interaction prototype.
 
 ## Current prototype
 
-The current build is a landscape-oriented Phaser 3 prototype with an 8-column by 6-row square grid. A blue player token starts near the left side of the board, an exit tile sits near the right side, and the player can be selected by tapping or clicking it. While selected, legal orthogonally adjacent destinations are highlighted. Tapping a highlighted empty tile moves the token and advances the turn counter. Illegal destinations do not move the player. A Reset button restores the initial player position and turn count.
+The current build is a landscape-oriented Phaser 3 prototype with an 8-column by 6-row square grid. It is tuned for phone landscape play: the board fills most of the screen, the compact status and controls sit beside the board, touch targets are approximately 44 CSS pixels or larger, page scrolling is disabled, and safe-area insets are respected. Small portrait phones show a tasteful “Rotate device for the best experience” overlay instead of a cramped board.
 
-The screen uses vector shapes, generated text, and responsive Vite/Phaser scaling so it can fit an iPhone browser in landscape orientation without page scrolling while remaining usable with a desktop mouse.
+A blue player token starts near the left side of the board, an exit tile sits near the right side, and a stationary training enemy starts with 4 HP. Terrain and occupants are separate: the exit and spikes are traversable terrain, while walls and enemy occupants block movement.
+
+## Controls and rules
+
+Use taps only; drag gestures are not required.
+
+- **Move** is the default action. Legal one-tile orthogonal destinations are highlighted. Moving consumes one turn. Moving onto the exit is legal and completes the level.
+- **Basic Strike** targets an orthogonally adjacent enemy, deals 1 damage, and consumes one turn.
+- **Kick** targets an orthogonally adjacent enemy, deals 1 damage, and attempts to push the enemy one tile directly away from the player. It consumes one turn.
+- If a Kick pushes the enemy toward a wall or the edge of the board, the enemy stays in place and takes 1 additional collision damage.
+- If a Kick pushes the enemy onto spikes, the enemy takes 3 additional spike damage and may remain on that spike tile. Spikes do not repeatedly damage stationary enemies in this iteration.
+- If the tile behind the enemy is blocked by another enemy, the push fails but the base 1 Kick damage still applies.
+- Killing the enemy is optional; the level is completed by reaching the exit.
+
+After victory, board input is disabled and a **Level Complete** panel shows the number of turns used plus a **Play Again** button. **Play Again** and **Reset** restore the initial player position, enemy HP and position, turn count, and victory state.
 
 ## Technology
 
@@ -51,4 +65,4 @@ To finish setup in GitHub, enable Pages for the repository and select **GitHub A
 
 ## Next planned systems
 
-Future work should add basic attack interactions, Power Strike, Kick, Fire Arrow, enemies, and environmental interactions. These systems are intentionally not implemented in this foundation milestone.
+Future work can add enemy AI, cards/deck management, fire, destructible objects, inventory, animations, progression, and multiplayer. These systems are intentionally not implemented in this focused prototype iteration.

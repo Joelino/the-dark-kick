@@ -15,3 +15,31 @@ body,
 canvas {
   display: block;
 }
+
+#app {
+  box-sizing: border-box;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+#rotate-overlay {
+  align-items: center;
+  background: rgba(15, 23, 42, 0.96);
+  box-sizing: border-box;
+  color: #f8fafc;
+  display: none;
+  font-size: 1.25rem;
+  font-weight: 800;
+  inset: 0;
+  justify-content: center;
+  line-height: 1.35;
+  padding: calc(24px + env(safe-area-inset-top)) calc(24px + env(safe-area-inset-right)) calc(24px + env(safe-area-inset-bottom)) calc(24px + env(safe-area-inset-left));
+  position: fixed;
+  text-align: center;
+  z-index: 10;
+}
+
+@media (orientation: portrait) and (max-width: 640px) {
+  #rotate-overlay {
+    display: flex;
+  }
+}
