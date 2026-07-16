@@ -1,13 +1,15 @@
 import { coordsEqual, isInsideGrid, manhattanDistance, type GridCoord, type GridSize, GRID_SIZE } from './grid';
-import { createInitialState, type Enemy, type GameState, type Terrain } from './state';
+import { createInitialState, type Corpse, type Enemy, type GameState, type Terrain } from './state';
 
 export type Action = 'move' | 'strike' | 'kick';
 
 export interface ActionResult {
   readonly state: GameState;
   readonly damage: readonly GridCoord[];
+  readonly damageAmount: number;
   readonly pushedFrom?: GridCoord;
   readonly pushedTo?: GridCoord;
+  readonly killed?: Corpse;
 }
 
 export const terrainAt = (state: GameState, coord: GridCoord): Terrain => {
@@ -47,12 +49,12 @@ export const movePlayer = (state: GameState, destination: GridCoord, grid: GridS
 };
 
 export const basicStrike = (state: GameState, target: GridCoord): ActionResult => {
-  if (!isLegalAttackTarget(state, target)) return { state, damage: [] };
+  if (!isLegalAttackTarget(state, target)) return { state, damage: [], damageAmount: 0 };
   return damageEnemy(state, target, 1);
 };
 
 export const kick = (state: GameState, target: GridCoord, grid: GridSize = GRID_SIZE): ActionResult => {
-  if (!isLegalAttackTarget(state, target)) return { state, damage: [] };
+  if (!isLegalAttackTarget(state, target)) return { state, damage: [], damageAmount: 0 };
 
   const direction = { col: target.col - state.player.col, row: target.row - state.player.row };
   const destination = { col: target.col + direction.col, row: target.row + direction.row };
@@ -87,16 +89,27 @@ const damageEnemy = (
   nextPosition: GridCoord = target,
   push?: Pick<ActionResult, 'pushedFrom' | 'pushedTo'>,
 ): ActionResult => {
-  const enemies = state.enemies
-    .map((enemy) => {
-      if (!coordsEqual(enemy.position, target)) return enemy;
-      return { ...enemy, position: { ...nextPosition }, hp: enemy.hp - amount };
-    })
-    .filter((enemy) => enemy.hp > 0);
+  let killed: Corpse | undefined;
+  const enemies = state.enemies.flatMap((enemy) => {
+    if (!coordsEqual(enemy.position, target)) return [enemy];
+
+    const damagedEnemy = { ...enemy, position: { ...nextPosition }, hp: enemy.hp - amount };
+    if (damagedEnemy.hp > 0) return [damagedEnemy];
+
+    killed = { enemyId: enemy.id, position: { ...nextPosition } };
+    return [];
+  });
 
   return {
-    state: { ...state, enemies, turn: state.turn + 1 },
-    damage: [target],
+    state: {
+      ...state,
+      enemies,
+      corpses: killed ? [...state.corpses, killed] : state.corpses,
+      turn: state.turn + 1,
+    },
+    damage: [{ ...nextPosition }],
+    damageAmount: amount,
+    ...(killed ? { killed } : {}),
     ...push,
   };
 };

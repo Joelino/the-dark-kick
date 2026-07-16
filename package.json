@@ -4,17 +4,30 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "check:dependencies": "node scripts/check-dependency-policy.mjs",
+    "preinstall": "npm run check:dependencies",
     "dev": "vite --host 0.0.0.0",
-    "test": "vitest run",
-    "build": "tsc && vite build",
-    "typecheck": "tsc --noEmit"
+    "test": "npm run check:dependencies && vitest run",
+    "build": "npm run check:dependencies && tsc && vite build",
+    "typecheck": "npm run check:dependencies && tsc --noEmit"
   },
   "dependencies": {
-    "phaser": "^3.90.0"
+    "phaser": "3.90.0"
   },
   "devDependencies": {
-    "typescript": "^5.8.3",
-    "vite": "^7.0.4",
-    "vitest": "^3.2.4"
+    "typescript": "5.9.3",
+    "vite": "7.3.5",
+    "vitest": "3.2.6"
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0",
+    "npm": ">=11.17.0"
+  },
+  "overrides": {
+    "esbuild": "0.27.2"
+  },
+  "allowScripts": {
+    "esbuild@0.27.2": true,
+    "fsevents@2.3.3": true
   }
 }

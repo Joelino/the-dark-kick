@@ -91,6 +91,9 @@ Implemented:
 - Stationary 4 HP training enemy.
 - Basic Strike.
 - Kick with push, wall collision, and spike damage.
+- 32rogues pixel-art styling for the fighter, enemy, dungeon terrain, hazards, and exit.
+- Movement, Strike, Kick, hit, and death animation sequences with impact feedback.
+- Persistent corpses that remain on the battlefield after an enemy dies.
 - Responsive phone layout and landscape orientation support.
 - Automated type checking, unit tests, build, CI, and deployment.
 

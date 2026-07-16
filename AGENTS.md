@@ -20,6 +20,15 @@ Prioritize a playable vertical slice over breadth.
 
 Do not introduce React, Vue, a backend, native iOS code, a database, or external services without an explicit decision.
 
+## Dependency safety
+
+- Do not add a package when the existing stack or platform APIs can reasonably do the job.
+- Direct dependencies are exact-pinned and allowlisted by `scripts/check-dependency-policy.mjs`.
+- Before approving a new direct package, verify that it is widely adopted, actively maintained, and owned/published through an expected account.
+- The project-level `.npmrc` rejects releases younger than 30 days and non-registry git/file/tarball dependency sources.
+- Keep install scripts fail-closed. Review and pin any necessary script approval by exact package version in `allowScripts`.
+- Use `npm ci` for reproducible installs from the committed lockfile. Do not bypass these controls with command-line overrides.
+
 ## Development principles
 
 - Keep game rules independent from Phaser rendering whenever practical.
@@ -29,7 +38,7 @@ Do not introduce React, Vue, a backend, native iOS code, a database, or external
 - Preserve touch usability, safe-area support, and a no-scroll phone layout.
 - Use taps rather than drag gestures unless explicitly requested.
 - Preview legal targets and deterministic consequences clearly.
-- Keep art as generated shapes and text until the mechanics are proven.
+- Prefer the locally included 32rogues sprites for the prototype's board, characters, terrain, and effects; keep the integration lightweight.
 
 ## Core action identities
 
@@ -80,7 +89,7 @@ Defer:
 Before finishing a task, run:
 
 ```bash
-npm install
+npm ci
 npm run typecheck
 npm run test
 npm run build
