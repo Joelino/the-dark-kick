@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title description">
+  <title id="title">The Dark Kick</title>
+  <desc id="description">A gold boot striking through a dungeon doorway on a dark background.</desc>
+  <rect width="512" height="512" fill="#120d13"/>
+  <rect x="34" y="34" width="444" height="444" rx="72" fill="none" stroke="#d2a855" stroke-width="18"/>
+  <path d="M146 116h190v57H203v88h-57z" fill="#8f7b64"/>
+  <path d="M202 225h79v74l45 34h73c22 0 39 17 39 39v21H266l-64-58z" fill="#f0d69b"/>
+  <path d="M202 335l64 58h172c-9 31-35 47-77 47H238l-92-84v-95h56z" fill="#9e532e"/>
+  <path d="M309 266l34-34 24 24-34 34zm57 20l49-13 9 33-49 13z" fill="#f6c365"/>
+</svg>

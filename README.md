@@ -2,9 +2,11 @@
 
 Touch-first tactical game interaction prototype.
 
+The current first-level rules and proposed enemy-turn iteration are documented in [`LEVEL.md`](./LEVEL.md).
+
 ## Current prototype
 
-The current build is a landscape-oriented Phaser 3 prototype with an 8-column by 6-row square grid. It is tuned for phone landscape play: the board fills most of the screen, the compact status and controls sit beside the board, touch targets are approximately 44 CSS pixels or larger, page scrolling is disabled, and safe-area insets are respected. Small portrait phones show a tasteful “Rotate device for the best experience” overlay instead of a cramped board.
+The current build is a landscape-oriented Phaser 3 prototype with an 8-column by 6-row square grid. It is tuned for phone landscape play: the board fills most of the screen, the compact status and controls sit beside the board, page scrolling is disabled, and safe-area insets are respected. Short, wide browser viewports use a wider logical canvas with larger board tiles and controls; very wide layouts place combat feedback in a third column instead of leaving unused black space. Small portrait phones show a tasteful “Rotate device for the best experience” overlay instead of a cramped board.
 
 A fighter starts near the left side of a 32rogues-styled dungeon board, an exit staircase sits near the right side, and a stationary orc starts with 4 HP. Terrain and occupants are separate: the exit and spikes are traversable terrain, while walls and enemy occupants block movement.
 
@@ -43,6 +45,10 @@ npm run dev
 ```
 
 Open the local Vite URL shown in the terminal. For phone testing on the same network, use the network URL emitted by Vite.
+
+## iPhone Home Screen mode
+
+For the largest play area on iPhone, open the deployed game in Safari, use **Share → Add to Home Screen**, and launch **The Dark Kick** from its icon. The included web app manifest opens it in standalone landscape mode without Safari's address and tab bars. Opening the ordinary link still uses the adaptive browser layout.
 
 ## Testing and build
 
