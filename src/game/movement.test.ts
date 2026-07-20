@@ -60,13 +60,17 @@ describe('tactical rules', () => {
     expect(enemyAt(result.state, { col: 3, row: 2 })?.hp).toBe(2);
   });
 
-  it('kick onto spikes deals 3 additional spike damage and can kill/remove the enemy', () => {
+  it('kick onto spikes kills the enemy and leaves a persistent corpse at the landing tile', () => {
     const state = withPlayer(createInitialState(), 2, 2);
     const result = kick(state, { col: 3, row: 2 });
 
     expect(result.pushedTo).toEqual({ col: 4, row: 2 });
     expect(enemyAt(result.state, { col: 4, row: 2 })).toBeUndefined();
     expect(result.state.enemies).toHaveLength(0);
+    expect(result.state.corpses).toEqual([{ enemyId: 'training-dummy', position: { col: 4, row: 2 } }]);
+
+    const moved = movePlayer(result.state, { col: 2, row: 1 });
+    expect(moved.corpses).toEqual(result.state.corpses);
   });
 
   it('failed push against a blocked ordinary obstacle keeps base kick damage', () => {
@@ -89,5 +93,6 @@ describe('tactical rules', () => {
 
     expect(won).not.toEqual(createInitialState());
     expect(resetGame()).toEqual(createInitialState());
+    expect(resetGame().corpses).toEqual([]);
   });
 });

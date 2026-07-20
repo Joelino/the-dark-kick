@@ -5,6 +5,8 @@ import { TacticalScene } from './scenes/TacticalScene';
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
   parent: 'app',
+  pixelArt: true,
+  roundPixels: true,
   backgroundColor: '#111827',
   scale: {
     mode: Phaser.Scale.FIT,
