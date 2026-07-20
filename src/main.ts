@@ -8,7 +8,9 @@ if (!app) throw new Error('Missing #app game mount.');
 
 const getLogicalGameWidth = (): number => {
   const viewport = window.visualViewport;
-  return logicalGameWidthForViewport(viewport?.width ?? app.clientWidth, viewport?.height ?? app.clientHeight);
+  const width = app.clientWidth || viewport?.width || window.innerWidth;
+  const height = app.clientHeight || viewport?.height || window.innerHeight;
+  return logicalGameWidthForViewport(width, height);
 };
 
 const config: Phaser.Types.Core.GameConfig = {
