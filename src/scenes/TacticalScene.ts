@@ -38,6 +38,7 @@ export class TacticalScene extends Phaser.Scene {
   private turnText?: Phaser.GameObjects.Text;
   private feedback?: Phaser.GameObjects.Text;
   private playerSprite?: Phaser.GameObjects.Sprite;
+  private highlightTween?: Phaser.Tweens.Tween;
   private readonly enemySprites = new Map<string, Phaser.GameObjects.Sprite>();
   private inputLocked = false;
 
@@ -150,6 +151,8 @@ export class TacticalScene extends Phaser.Scene {
   }
 
   private renderBoard(): void {
+    this.highlightTween?.stop();
+    this.highlightTween = undefined;
     this.tileLayer?.destroy(true);
     this.tileLayer = this.add.container(0, 0).setDepth(10);
     this.enemySprites.clear();
@@ -157,6 +160,7 @@ export class TacticalScene extends Phaser.Scene {
     this.turnText?.setText(`TURN ${this.state.turn}`);
 
     const legalTargets = legalTargetsForAction(this.state, this.selectedAction);
+    const highlights: Phaser.GameObjects.Rectangle[] = [];
 
     for (const coord of allGridCoords()) {
       const position = this.gridToWorld(coord);
@@ -189,8 +193,12 @@ export class TacticalScene extends Phaser.Scene {
       if (legal) {
         const highlight = this.add.rectangle(position.x, position.y, TILE_SIZE - 4, TILE_SIZE - 4, 0x6fbd62, 0.16).setStrokeStyle(3, 0xa9e68f, 0.9);
         this.tileLayer.add(highlight);
-        this.tweens.add({ targets: highlight, alpha: { from: 0.35, to: 0.65 }, duration: 620, yoyo: true, repeat: -1, ease: 'Sine.InOut' });
+        highlights.push(highlight);
       }
+    }
+
+    if (highlights.length > 0) {
+      this.highlightTween = this.tweens.add({ targets: highlights, alpha: { from: 0.35, to: 0.65 }, duration: 620, yoyo: true, repeat: -1, ease: 'Sine.InOut' });
     }
 
     for (const corpse of this.state.corpses) this.addCorpse(corpse.position, corpse.enemyId);
