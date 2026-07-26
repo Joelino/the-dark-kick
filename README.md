@@ -10,6 +10,8 @@ The current build is a landscape-oriented Phaser 3 prototype with an 8-column by
 
 A fighter starts near the left side of a 32rogues-styled dungeon board, an exit staircase sits near the right side, and two 4 HP orcs close in from near and far positions. Terrain and occupants are separate: the exit and spikes are traversable terrain, while walls and enemy occupants block movement.
 
+The tactical readout opens on **Turn Order**, listing the player and living orcs with HP, attack, and their next action. A **Combat Log** tab keeps the latest four factual results without replacing the default unit overview. A small date-and-branch build label beneath the title makes deployed playtest versions easy to identify.
+
 Movement, Strike, and Kick use short squash-and-stretch action sequences. Hits add impact flashes, damage numbers, particles, and camera shake. Lethal hits collapse the enemy into a bloodied corpse that stays on its death tile for the rest of the run.
 
 ## Controls and rules
