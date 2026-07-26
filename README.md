@@ -8,7 +8,9 @@ The current first-level rules and proposed enemy-turn iteration are documented i
 
 The current build is a landscape-oriented Phaser 3 prototype with an 8-column by 6-row square grid. It is tuned for phone landscape play: the board fills most of the screen, the compact status and controls sit beside the board, page scrolling is disabled, and safe-area insets are respected. Short, wide browser viewports use a wider logical canvas with larger board tiles and controls; very wide layouts place combat feedback in a third column instead of leaving unused black space. Small portrait phones show a tasteful “Rotate device for the best experience” overlay instead of a cramped board.
 
-A fighter starts near the left side of a 32rogues-styled dungeon board, an exit staircase sits near the right side, and a stationary orc starts with 4 HP. Terrain and occupants are separate: the exit and spikes are traversable terrain, while walls and enemy occupants block movement.
+A fighter starts near the left side of a 32rogues-styled dungeon board, an exit staircase sits near the right side, and two 4 HP orcs close in from near and far positions. Terrain and occupants are separate: the exit and spikes are traversable terrain, while walls and enemy occupants block movement.
+
+The tactical readout opens on **Turn Order**, listing the player and living orcs with HP, attack, and their next action. A **Combat Log** tab keeps the latest four factual results without replacing the default unit overview. A small date-and-branch build label beneath the title makes deployed playtest versions easy to identify.
 
 Movement, Strike, and Kick use short squash-and-stretch action sequences. Hits add impact flashes, damage numbers, particles, and camera shake. Lethal hits collapse the enemy into a bloodied corpse that stays on its death tile for the rest of the run.
 
@@ -16,12 +18,11 @@ Movement, Strike, and Kick use short squash-and-stretch action sequences. Hits a
 
 Use taps only; drag gestures are not required.
 
-- **Move** is the default action. Legal one-tile orthogonal destinations are highlighted. Moving consumes one turn. Moving onto the exit is legal and completes the level.
-- **Basic Strike** targets an orthogonally adjacent enemy, deals 1 damage, and consumes one turn.
-- **Kick** targets an orthogonally adjacent enemy, deals 1 damage, and attempts to push the enemy one tile directly away from the player. It consumes one turn.
-- If a Kick pushes the enemy toward a wall or the edge of the board, the enemy stays in place and takes 1 additional collision damage.
-- If a Kick pushes the enemy onto spikes, the enemy takes 3 additional spike damage and may remain on that spike tile. Spikes do not repeatedly damage stationary enemies in this iteration.
-- If the tile behind the enemy is blocked by another enemy, the push fails but the base 1 Kick damage still applies.
+- Each player turn allows one highlighted orthogonal **Move** and one **action** in either order. The action is either **Strike** or **Kick**; use **End Turn** to give up an unused move or action.
+- **Basic Strike** targets an orthogonally adjacent enemy and deals 1 damage.
+- **Kick** targets an orthogonally adjacent enemy. Open floor repositions it for 0 damage; a wall or board edge deals 1 collision damage and stuns it; colliding with another enemy stuns both and deals 1 to the pushed enemy; a spike landing combines 1 impact damage with the 3 spike bonus and kills a full-health orc.
+- Each orc shows exactly one committed intent: a gold movement arrow or red attack marker. It then takes one action, moving along a deterministic shortest path or striking an adjacent player for 1 damage.
+- Stunned enemies show persistent gold stars, have no intent, and skip their next action.
 - Killing the enemy is optional; the level is completed by reaching the exit.
 
 After victory, board input is disabled and a **Level Complete** panel shows the number of turns used plus a **Play Again** button. **Play Again** and **Reset** restore the initial player position, enemy HP and position, turn count, and victory state.
@@ -87,4 +88,4 @@ To finish setup in GitHub, enable Pages for the repository and select **GitHub A
 
 ## Next planned systems
 
-Future work can add enemy AI, cards/deck management, fire, destructible objects, inventory, progression, and multiplayer. These systems are intentionally not implemented in this focused prototype iteration.
+Future work can add ranged enemies and cover, fire, destructible objects, inventory, progression, and multiplayer. These systems are intentionally not implemented in this focused prototype iteration.

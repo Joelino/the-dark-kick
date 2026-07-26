@@ -1,8 +1,11 @@
 import Phaser from 'phaser';
+import { BUILD_LABEL } from '../config/build';
+import { COMBAT } from '../config/combat';
 import { allGridCoords, coordsEqual, type GridCoord } from '../game/grid';
 import { createTacticalLayout, GAME_HEIGHT, MIN_GAME_WIDTH, type TacticalLayout } from '../game/layout';
 import {
   basicStrike,
+  endPlayerTurn,
   kick,
   legalTargetsForAction,
   movePlayer,
@@ -11,7 +14,7 @@ import {
   type Action,
   type ActionResult,
 } from '../game/movement';
-import { createInitialState, type GameState } from '../game/state';
+import { type EnemyIntent, type GameState } from '../game/state';
 
 const PLAYER_FRAME = 8;
 const ENEMY_FRAME = 0;
@@ -26,7 +29,7 @@ const MONSTERS_URL = new URL('../../assets/raw/32rogues/32rogues/monsters.png', 
 const TILES_URL = new URL('../../assets/raw/32rogues/32rogues/tiles.png', import.meta.url).href;
 
 export class TacticalScene extends Phaser.Scene {
-  private state: GameState = createInitialState();
+  private state: GameState = resetGame();
   private layout: TacticalLayout = createTacticalLayout(MIN_GAME_WIDTH);
   private selectedAction: Action = 'move';
   private tileLayer?: Phaser.GameObjects.Container;
@@ -39,7 +42,8 @@ export class TacticalScene extends Phaser.Scene {
   private readonly enemySprites = new Map<string, Phaser.GameObjects.Sprite>();
   private inputLocked = false;
   private pendingLayoutWidth?: number;
-  private feedbackMessage = 'Choose a path. Make the room your weapon.';
+  private panelTab: 'order' | 'log' = 'order';
+  private combatLog: string[] = ['T1 Objective: reach the exit.'];
 
   constructor() {
     super('tactical-scene');
@@ -71,7 +75,7 @@ export class TacticalScene extends Phaser.Scene {
       .setOrigin(1, 0.5)
       .setDepth(22);
     this.feedback = this.add
-      .text(this.layout.logArea.x, this.layout.logArea.bodyY, this.feedbackMessage, bodyStyle(this.layout.shortLandscape ? 17 : 15, '#c8bda8'))
+      .text(this.layout.logArea.x, this.layout.logArea.bodyY + 36, '', bodyStyle(this.layout.shortLandscape ? 15 : 13, '#c8bda8'))
       .setWordWrapWidth(this.layout.logArea.width)
       .setDepth(22);
     this.addHud();
@@ -110,9 +114,42 @@ export class TacticalScene extends Phaser.Scene {
     if (nextWidth !== this.layout.gameWidth) this.rebuildDisplay(nextWidth);
   }
 
-  private setFeedback(message: string): void {
-    this.feedbackMessage = message;
-    this.feedback?.setText(message);
+  private appendCombatLog(message: string, turn = this.state.turn): void {
+    this.combatLog = [...this.combatLog, `T${turn} ${message}`].slice(-4);
+    this.renderInfoPanel();
+  }
+
+  private renderInfoPanel(): void {
+    if (!this.feedback) return;
+    if (this.panelTab === 'log') {
+      this.feedback.setText(this.combatLog.join('\n'));
+      return;
+    }
+
+    const player = `1  YOU     HP ${this.state.playerHp}/${COMBAT.playerMaxHealth}  ATK ${COMBAT.playerStrikeDamage}`;
+    const enemies = [...this.state.enemies].sort((a, b) => a.position.row - b.position.row || a.position.col - b.position.col).map((enemy, index) => {
+      const intent = this.state.intents.find((candidate) => candidate.enemyId === enemy.id);
+      const status = enemy.stunnedTurns > 0
+        ? 'STUNNED · SKIPS'
+        : intent?.kind === 'attack'
+          ? 'ATTACKS YOU'
+          : intent
+            ? `MOVES → ${intent.target.col},${intent.target.row}`
+            : 'NO ACTION';
+      return `${index + 2}  ${enemy.id === 'near-orc' ? 'NEAR' : enemy.id === 'far-orc' ? 'FAR' : 'ORC'}  HP ${enemy.hp}/${COMBAT.orcMaxHealth}  ATK ${COMBAT.orcStrikeDamage} · ${status}`;
+    });
+    this.feedback.setText([player, ...enemies].join('\n'));
+  }
+
+  private appendEnemySummary(before: GameState, after: GameState): void {
+    const damage = before.playerHp - after.playerHp;
+    const moves = before.enemies.filter((enemy) => {
+      const resolved = after.enemies.find((candidate) => candidate.id === enemy.id);
+      return resolved && !coordsEqual(enemy.position, resolved.position);
+    }).length;
+    const skipped = before.enemies.filter((enemy) => enemy.stunnedTurns > 0).length;
+    const facts = [damage > 0 ? `player -${damage} HP` : '', moves > 0 ? `${moves} orc move${moves === 1 ? '' : 's'}` : '', skipped > 0 ? `${skipped} stunned skip${skipped === 1 ? '' : 's'}` : ''].filter(Boolean);
+    this.appendCombatLog(`Enemies: ${facts.length ? facts.join(' · ') : 'no effect'}.`, before.turn);
   }
 
   private addBackground(): void {
@@ -140,7 +177,8 @@ export class TacticalScene extends Phaser.Scene {
 
     this.add.text(this.layout.title.x, this.layout.title.y, 'THE DARK KICK', smallCapsStyle(this.layout.shortLandscape ? 25 : 23, '#f0d69b')).setDepth(22);
     this.add.text(this.layout.subtitle.x, this.layout.subtitle.y, 'A ROOM IS A WEAPON', smallCapsStyle(this.layout.shortLandscape ? 12 : 11, '#8f7b64')).setDepth(22);
-    this.add.text(logArea.x, logArea.headingY, 'COMBAT LOG', smallCapsStyle(this.layout.shortLandscape ? 12 : 11, '#8f7b64')).setDepth(22);
+    this.add.text(this.layout.subtitle.x, this.layout.subtitle.y + 18, `BUILD ${BUILD_LABEL}`, smallCapsStyle(10, '#6f6258')).setDepth(22);
+    this.add.text(logArea.x, logArea.headingY, 'TACTICAL READOUT', smallCapsStyle(this.layout.shortLandscape ? 12 : 11, '#8f7b64')).setDepth(22);
     this.add
       .text(this.layout.boardHeading.x, this.layout.boardHeading.y, 'THE FIRST CELLAR', smallCapsStyle(this.layout.shortLandscape ? 12 : 10, '#786959'))
       .setOrigin(0, 0.5)
@@ -153,9 +191,28 @@ export class TacticalScene extends Phaser.Scene {
 
     const { actionYs, height, resetHeight, resetY, width, x } = this.layout.buttons;
     this.addButton(x, actionYs[0], width, height, 'MOVE', 'Step to an adjacent tile', 'move', () => this.selectAction('move'));
-    this.addButton(x, actionYs[1], width, height, 'STRIKE', '1 damage · adjacent', 'strike', () => this.selectAction('strike'));
+    this.addButton(x, actionYs[1], width, height, 'STRIKE', `${COMBAT.playerStrikeDamage} damage · adjacent`, 'strike', () => this.selectAction('strike'));
     this.addButton(x, actionYs[2], width, height, 'KICK', 'Push · collision damage', 'kick', () => this.selectAction('kick'));
-    this.addButton(x, resetY, width, resetHeight, 'RESET RUN', '', undefined, () => this.reset());
+    this.addButton(x - width * 0.26, resetY, width * 0.46, resetHeight, 'END TURN', '', undefined, () => this.finishPlayerTurn());
+    this.addButton(x + width * 0.26, resetY, width * 0.46, resetHeight, 'RESET', '', undefined, () => this.reset());
+    this.addPanelTab(this.layout.logArea.x, this.layout.logArea.bodyY, 'TURN ORDER', 'order');
+    this.addPanelTab(this.layout.logArea.x + Math.min(132, this.layout.logArea.width * 0.54), this.layout.logArea.bodyY, 'COMBAT LOG', 'log');
+  }
+
+  private addPanelTab(x: number, y: number, label: string, tab: 'order' | 'log'): void {
+    const active = this.panelTab === tab;
+    const width = Math.min(122, this.layout.logArea.width * 0.48);
+    const button = this.add.rectangle(x, y, width, 27, active ? 0x5d3c20 : 0x21191c).setOrigin(0).setStrokeStyle(1, active ? 0xe6b85c : 0x57454a);
+    const text = this.add.text(x + width / 2, y + 14, label, smallCapsStyle(this.layout.shortLandscape ? 11 : 10, active ? '#ffe0a1' : '#a99c91')).setOrigin(0.5);
+    for (const object of [button, text]) {
+      object.setInteractive({ useHandCursor: true });
+      object.on('pointerup', () => {
+        this.panelTab = tab;
+        this.addHud();
+        this.renderInfoPanel();
+      });
+      this.hudLayer?.add(object);
+    }
   }
 
   private addButton(
@@ -198,14 +255,15 @@ export class TacticalScene extends Phaser.Scene {
     this.selectedAction = action;
     this.addHud();
     this.renderBoard();
-    this.setFeedback(action === 'move' ? 'Green tiles are safe steps.' : action === 'strike' ? 'Strike an adjacent enemy.' : 'Kick toward walls, spikes, or trouble.');
+    this.renderInfoPanel();
   }
 
   private reset(): void {
     if (this.inputLocked) return;
     this.state = resetGame();
     this.selectedAction = 'move';
-    this.setFeedback('A fresh room. Try kicking the orc onto the spikes.');
+    this.panelTab = 'order';
+    this.combatLog = ['T1 Objective: reach the exit.'];
     this.addHud();
     this.renderBoard();
   }
@@ -217,7 +275,8 @@ export class TacticalScene extends Phaser.Scene {
     this.tileLayer = this.add.container(0, 0).setDepth(10);
     this.enemySprites.clear();
     this.playerSprite = undefined;
-    this.turnText?.setText(`TURN ${this.state.turn}`);
+    this.turnText?.setText(`TURN ${this.state.turn}  ·  HP ${this.state.playerHp}/${COMBAT.playerMaxHealth}`);
+    this.renderInfoPanel();
     const { spriteScale, tileSize } = this.layout;
 
     const legalTargets = legalTargetsForAction(this.state, this.selectedAction);
@@ -263,10 +322,11 @@ export class TacticalScene extends Phaser.Scene {
     }
 
     for (const corpse of this.state.corpses) this.addCorpse(corpse.position, corpse.enemyId);
-    for (const enemy of this.state.enemies) this.addEnemy(enemy.id, enemy.position, enemy.hp);
+    for (const intent of this.state.intents) this.addIntent(intent);
+    for (const enemy of this.state.enemies) this.addEnemy(enemy.id, enemy.position, enemy.hp, enemy.stunnedTurns > 0);
     this.addPlayer(this.state.player);
 
-    if (this.state.won) this.showVictoryPanel();
+    if (this.state.won || this.state.lost) this.showEndPanel();
   }
 
   private addCorpse(position: GridCoord, enemyId: string): void {
@@ -283,14 +343,26 @@ export class TacticalScene extends Phaser.Scene {
     this.tileLayer?.add([blood, corpse]);
   }
 
-  private addEnemy(id: string, position: GridCoord, hp: number): void {
+  private addIntent(intent: EnemyIntent): void {
+    const enemy = this.state.enemies.find((candidate) => candidate.id === intent.enemyId);
+    if (!enemy) return;
+    const from = this.gridToWorld(enemy.position);
+    const to = this.gridToWorld(intent.target);
+    const marker = intent.kind === 'attack'
+      ? this.add.text(to.x, to.y, '✦', smallCapsStyle(34, '#ff655f')).setOrigin(0.5).setStroke('#2a0707', 5)
+      : this.add.text((from.x + to.x) / 2, (from.y + to.y) / 2, '➜', smallCapsStyle(30, '#f0b85c')).setOrigin(0.5).setAngle(Phaser.Math.RadToDeg(Math.atan2(to.y - from.y, to.x - from.x)));
+    marker.setAlpha(0.92);
+    this.tileLayer?.add(marker);
+  }
+
+  private addEnemy(id: string, position: GridCoord, hp: number, stunned: boolean): void {
     const world = this.gridToWorld(position);
     const { spriteScale, tileSize } = this.layout;
     const hpWidth = tileSize * 0.72;
     const shadow = this.add.ellipse(world.x, world.y + tileSize * 0.34, tileSize * 0.625, tileSize * 0.2, 0x050405, 0.7);
     const sprite = this.add.sprite(world.x, world.y - 2, 'monsters', ENEMY_FRAME).setScale(spriteScale);
     const hpBack = this.add.rectangle(world.x, world.y - tileSize * 0.45, hpWidth, 7, 0x150e11, 0.95).setStrokeStyle(1, 0x5f3f43);
-    const hpFill = this.add.rectangle(world.x - hpWidth / 2 + 1, world.y - tileSize * 0.45, ((hpWidth - 2) * hp) / 4, 5, 0xb5413f, 1).setOrigin(0, 0.5);
+    const hpFill = this.add.rectangle(world.x - hpWidth / 2 + 1, world.y - tileSize * 0.45, ((hpWidth - 2) * hp) / COMBAT.orcMaxHealth, 5, 0xb5413f, 1).setOrigin(0, 0.5);
     const hitArea = this.add.rectangle(world.x, world.y, tileSize, tileSize, 0xffffff, 0.001);
     hitArea.setInteractive({ useHandCursor: true });
     hitArea.on('pointerup', () => {
@@ -298,6 +370,10 @@ export class TacticalScene extends Phaser.Scene {
     });
     this.enemySprites.set(id, sprite);
     this.tileLayer?.add([shadow, sprite, hpBack, hpFill, hitArea]);
+    if (stunned) {
+      const marker = this.add.text(world.x, world.y - tileSize * 0.25, '★  ★', smallCapsStyle(18, '#ffe36e')).setOrigin(0.5).setStroke('#3a2700', 4);
+      this.tileLayer?.add(marker);
+    }
   }
 
   private addPlayer(position: GridCoord): void {
@@ -325,22 +401,45 @@ export class TacticalScene extends Phaser.Scene {
 
     this.inputLocked = true;
     if (action === 'move') {
-      this.setFeedback(nextState.won ? 'The way out is open.' : 'Boots scrape across old stone.');
+      this.appendCombatLog(nextState.won ? 'You: exit reached.' : `You: move to ${coord.col},${coord.row}.`);
       await this.animateMove(before.player, coord);
     } else if (result) {
-      this.setFeedback(
-        result.killed
-          ? 'Down. The body stays where it fell.'
-          : result.pushedTo
-            ? `Kick lands for ${result.damageAmount}. The orc is hurled back.`
-            : action === 'kick'
-              ? `CRUNCH. ${result.damageAmount} damage.`
-              : `Steel bites for ${result.damageAmount} damage.`,
+      this.appendCombatLog(
+        action === 'strike'
+          ? `You: strike · ${result.damageAmount} damage${result.killed ? ' · kill' : ''}.`
+          : `You: kick · ${result.damageAmount} damage${result.pushedTo ? ` · push to ${result.pushedTo.col},${result.pushedTo.row}` : ''}${result.killed ? ' · kill' : ''}.`,
       );
       await this.animateAttack(action, before, coord, result);
     }
 
     this.state = nextState;
+    if (this.state.moved && this.state.acted) {
+      // Render the resolved player action before consuming stun in the enemy
+      // phase. In particular, a move-then-kick must not erase its static stun
+      // marker in the same frame in which it is applied.
+      this.renderBoard();
+      await this.delay(420);
+      const beforeEnemies = this.state;
+      this.state = endPlayerTurn(this.state);
+      this.appendEnemySummary(beforeEnemies, this.state);
+    }
+    this.selectedAction = this.state.acted ? 'move' : this.state.moved ? 'strike' : 'move';
+    this.addHud();
+    this.renderBoard();
+    this.inputLocked = false;
+    this.flushPendingLayout();
+  }
+
+  private async finishPlayerTurn(): Promise<void> {
+    if (this.inputLocked) return;
+    if (!this.state.moved && !this.state.acted) {
+      return;
+    }
+    this.inputLocked = true;
+    await this.delay(420);
+    const beforeEnemies = this.state;
+    this.state = endPlayerTurn(this.state);
+    this.appendEnemySummary(beforeEnemies, this.state);
     this.selectedAction = 'move';
     this.addHud();
     this.renderBoard();
@@ -500,11 +599,11 @@ export class TacticalScene extends Phaser.Scene {
     }
   }
 
-  private showVictoryPanel(): void {
+  private showEndPanel(): void {
     const centerX = this.layout.boardFrame.x + this.layout.boardFrame.width / 2;
     const shade = this.add.rectangle(this.layout.gameWidth / 2, GAME_HEIGHT / 2, this.layout.gameWidth, GAME_HEIGHT, 0x070507, 0.72);
     const panel = this.add.rectangle(centerX, GAME_HEIGHT / 2, 382, 220, 0x171116, 0.98).setStrokeStyle(3, 0xd2a855);
-    const title = this.add.text(centerX, 218, 'CELLAR CLEARED', smallCapsStyle(27, '#f3d28e')).setOrigin(0.5);
+    const title = this.add.text(centerX, 218, this.state.won ? 'CELLAR CLEARED' : 'FALLEN', smallCapsStyle(27, '#f3d28e')).setOrigin(0.5);
     const turns = this.add.text(centerX, 263, `${this.state.turn - 1} turns · the dark waits below`, bodyStyle(15, '#b7a896')).setOrigin(0.5);
     const button = this.add.rectangle(centerX, 325, 184, 48, 0x5d3c20, 1).setStrokeStyle(3, 0xe6b85c);
     const label = this.add.text(centerX, 325, 'DESCEND AGAIN', smallCapsStyle(15, '#ffe0a1')).setOrigin(0.5);
@@ -526,6 +625,10 @@ export class TacticalScene extends Phaser.Scene {
         },
       });
     });
+  }
+
+  private delay(duration: number): Promise<void> {
+    return new Promise((resolve) => this.time.delayedCall(duration, resolve));
   }
 
   private gridToWorld(coord: GridCoord): Phaser.Math.Vector2 {
