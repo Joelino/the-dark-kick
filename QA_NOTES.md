@@ -18,6 +18,9 @@ more tactically meaningful without making the encounter hard to read?
 - Enemy pathfinding chooses a spike-free route when one exists, but can cross a
   spike if there is no safe route.
 - Stun removes intent, skips one enemy action, and expires afterward.
+- Custom board bounds remain in effect when the next turn's intents are
+  generated, so rule tests and future compact encounters cannot pathfind beyond
+  their configured grid.
 
 ## Browser walkthrough
 

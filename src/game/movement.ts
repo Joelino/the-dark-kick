@@ -98,7 +98,10 @@ export const chooseEnemyIntents = (state: GameState, grid: GridSize = GRID_SIZE)
     return step ? [{ enemyId: enemy.id, kind: 'move', target: step }] : [];
   });
 
-export const withEnemyIntents = (state: GameState): GameState => ({ ...state, intents: chooseEnemyIntents(state) });
+export const withEnemyIntents = (state: GameState, grid: GridSize = GRID_SIZE): GameState => ({
+  ...state,
+  intents: chooseEnemyIntents(state, grid),
+});
 
 export const enemyTurnOrder = (state: GameState): readonly string[] =>
   [...state.enemies].sort(readingOrder).map((enemy) => enemy.id);
@@ -181,11 +184,11 @@ export const resolveEnemyAction = (state: GameState, enemyId: string, grid: Grid
   };
 };
 
-export const finishEnemyTurn = (state: GameState): GameState => {
+export const finishEnemyTurn = (state: GameState, grid: GridSize = GRID_SIZE): GameState => {
   if (state.won) return state;
   if (state.lost) return { ...state, intents: [] };
   const next = { ...state, turn: state.turn + 1, moved: false, acted: false, intents: [] };
-  return withEnemyIntents(next);
+  return withEnemyIntents(next, grid);
 };
 
 /** Resolves committed intents in reading order, then opens the next player turn. */
@@ -196,7 +199,7 @@ export const endPlayerTurn = (state: GameState, grid: GridSize = GRID_SIZE): Gam
     next = resolveEnemyAction(next, enemyId, grid).state;
     if (next.lost) break;
   }
-  return finishEnemyTurn(next);
+  return finishEnemyTurn(next, grid);
 };
 
 export const resetGame = (): GameState => withEnemyIntents(createInitialState());
