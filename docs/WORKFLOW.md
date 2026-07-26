@@ -23,6 +23,7 @@ markdown files instead of re-reading the whole repo.
 | `ROADMAP.md` | every session (verdicts) | humans reasoning | Viktor + Claude |
 | `CURRENT_PR.md` | per PR | **Codex** (to build) | Claude writes, Codex reads |
 | `README.md` | per PR | anyone | **Codex** (implementation record) |
+| `QA_NOTES.md` | per PR | implementer + playtester | **Codex** writes, Viktor validates |
 | `WORKFLOW.md` | rarely | all | Viktor + Claude |
 
 **Reasoning docs** (brief / design / roadmap) are for Viktor and Claude.
@@ -39,10 +40,12 @@ Each participant writes only the artifact they're actually qualified to write.
 1. **Plan** — *Viktor + Claude.* Decide the next experiment: its hypothesis and,
    for the current one, a full spec. Claude updates `DESIGN.md` and `ROADMAP.md`,
    then writes a clean `CURRENT_PR.md`.
-2. **Build** — *Codex.* Implements the PR and writes the **PR summary** (what it
-   actually built, assumptions, surprises). Codex is the only one who knows the
-   implementation details, so it owns this record. Codex also updates `README.md`
-   and checks off the roadmap item.
+2. **Build + QA** — *Codex.* Implements the PR, runs automated checks, walks the
+   running game at a phone-sized viewport when browser control is available, and
+   writes `QA_NOTES.md`. The notes record what was checked, reasonable-person
+   expectations beyond the literal spec, assumptions, contradictions, and what
+   still needs human judgment. Codex also writes the **PR summary**, updates
+   `README.md`, and checks off the roadmap item.
 3. **Playtest** — *Viktor, alone.* The crucial step no one else can do: proving
    whether it's *fun* is a human judgment. Claude can't feel the game.
 4. **Evaluate** — *Viktor + Claude.* Viktor brings raw impressions; Claude helps
@@ -54,7 +57,7 @@ Each participant writes only the artifact they're actually qualified to write.
    next session start sharp.
 
 ```
-plan (V+C) → build + PR summary (Codex) → playtest (V) → evaluate (V+C) → roadmap verdict
+plan (V+C) → build + QA notes (Codex) → playtest (V) → evaluate (V+C) → roadmap verdict
      ▲                                                                          │
      └──────────────────────── next experiment sharpened ◄─────────────────────┘
 ```

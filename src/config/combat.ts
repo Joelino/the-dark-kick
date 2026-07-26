@@ -5,6 +5,7 @@ export const COMBAT = {
   playerKickDamage: 0,
   orcMaxHealth: 4,
   orcStrikeDamage: 1,
+  spikeEntryDamage: 3,
   spikePushDamage: 3,
   wallCollisionDamage: 1,
   stunTurns: 1,

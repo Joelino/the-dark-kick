@@ -76,7 +76,9 @@ Damage is deterministic and applies immediately. Bonus damage from a collision o
 - Corpses are visual remains: they do not block movement, targeting, or forced movement.
 - Player health does not regenerate during the level.
 - There is no armor, healing, critical damage, or random damage in this phase.
-- Spikes trigger only when forced movement places a unit on them. Normal movement across spikes is safe, and standing on spikes does not repeat damage.
+- Spikes deal 3 damage whenever voluntary or forced movement places a unit on
+  them. A Kick onto spikes also carries 1 point of forced impact, so the full
+  interaction deals 4. Standing on spikes does not repeat damage.
 
 The player HUD always shows current and maximum health. Enemy health remains visible above each enemy; adding a numeric value such as `3/4` alongside the bar is preferred while tuning.
 
@@ -88,14 +90,20 @@ Player and enemy movement share the same basic occupancy rules.
 - Diagonal movement is not allowed.
 - Walls and the edge of the board are impassable.
 - Living units block movement. Units cannot pass through, overlap, or swap places.
-- Floor, exit, spikes, and corpse tiles are traversable.
+- Floor, exit, spikes, and corpse tiles are traversable, but entering spikes
+  deals damage.
 - The exit is special only for the player; an enemy standing on it blocks entry like any other living occupant.
 - Legal player destinations are previewed before the tap.
 - An illegal tap leaves all state unchanged and produces no animation or log entry.
 
 A Kick is forced movement, not a Move. It uses the existing collision and spike rules and can invalidate the target's committed intent.
 
-Enemy pathfinding seeks the closest unoccupied tile orthogonally adjacent to the player and considers other living units and walls blocked. It may route across exit, spike, and corpse tiles because normal movement onto those tiles has no special effect. Intent selection and pathfinding must be pure and deterministic so the preview always matches resolution unless the player disrupts it.
+Enemy pathfinding seeks the closest unoccupied tile orthogonally adjacent to the
+player and considers other living units and walls blocked. It may route across
+exit and corpse tiles. It finds a spike-free path first, then considers a route
+across spikes only when no safe path exists. Intent selection and pathfinding
+must be pure and deterministic so the preview always matches resolution unless
+the player disrupts it.
 
 ## Combat log
 

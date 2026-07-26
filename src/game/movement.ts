@@ -12,6 +12,18 @@ export interface ActionResult {
   readonly killed?: Corpse;
 }
 
+export type EnemyActionKind = 'move' | 'attack' | 'miss' | 'stunned' | 'wait';
+
+export interface EnemyActionResult {
+  readonly state: GameState;
+  readonly enemyId: string;
+  readonly kind: EnemyActionKind;
+  readonly from: GridCoord;
+  readonly target?: GridCoord;
+  readonly damageAmount: number;
+  readonly killed?: Corpse;
+}
+
 export const terrainAt = (state: GameState, coord: GridCoord): Terrain => {
   if (state.walls.some((wall) => coordsEqual(wall, coord))) return 'wall';
   if (coordsEqual(state.exit, coord)) return 'exit';
@@ -36,7 +48,16 @@ export const legalTargetsForAction = (state: GameState, action: Action): GridCoo
 
 export const movePlayer = (state: GameState, destination: GridCoord, grid: GridSize = GRID_SIZE): GameState => {
   if (!isLegalMove(state, destination, grid)) return state;
-  return { ...state, player: { ...destination }, moved: true, won: coordsEqual(destination, state.exit) };
+  const spikeDamage = terrainAt(state, destination) === 'spikes' ? COMBAT.spikeEntryDamage : 0;
+  const playerHp = Math.max(0, state.playerHp - spikeDamage);
+  return {
+    ...state,
+    player: { ...destination },
+    playerHp,
+    moved: true,
+    won: coordsEqual(destination, state.exit),
+    lost: playerHp === 0,
+  };
 };
 export const basicStrike = (state: GameState, target: GridCoord): ActionResult => {
   if (!isLegalAttackTarget(state, target)) return empty(state);
@@ -79,33 +100,111 @@ export const chooseEnemyIntents = (state: GameState, grid: GridSize = GRID_SIZE)
 
 export const withEnemyIntents = (state: GameState): GameState => ({ ...state, intents: chooseEnemyIntents(state) });
 
+export const enemyTurnOrder = (state: GameState): readonly string[] =>
+  [...state.enemies].sort(readingOrder).map((enemy) => enemy.id);
+
+/** Resolves one committed enemy action so the scene can animate the same result. */
+export const resolveEnemyAction = (state: GameState, enemyId: string, grid: GridSize = GRID_SIZE): EnemyActionResult => {
+  const enemy = state.enemies.find((candidate) => candidate.id === enemyId);
+  if (!enemy) return { state, enemyId, kind: 'wait', from: { ...state.player }, damageAmount: 0 };
+
+  const from = { ...enemy.position };
+  if (enemy.stunnedTurns > 0) {
+    const enemies = state.enemies.map((candidate) =>
+      candidate.id === enemyId ? { ...candidate, stunnedTurns: Math.max(0, candidate.stunnedTurns - 1) } : candidate,
+    );
+    return { state: withoutIntent({ ...state, enemies }, enemyId), enemyId, kind: 'stunned', from, damageAmount: 0 };
+  }
+
+  const intent = state.intents.find((candidate) => candidate.enemyId === enemyId);
+  if (!intent) return { state, enemyId, kind: 'wait', from, damageAmount: 0 };
+
+  if (intent.kind === 'attack') {
+    const hits = coordsEqual(state.player, intent.target) && manhattanDistance(enemy.position, intent.target) === 1;
+    if (!hits) {
+      return {
+        state: withoutIntent(state, enemyId),
+        enemyId,
+        kind: 'miss',
+        from,
+        target: { ...intent.target },
+        damageAmount: 0,
+      };
+    }
+    const playerHp = Math.max(0, state.playerHp - COMBAT.orcStrikeDamage);
+    return {
+      state: withoutIntent({ ...state, playerHp, lost: playerHp === 0 }, enemyId),
+      enemyId,
+      kind: 'attack',
+      from,
+      target: { ...intent.target },
+      damageAmount: COMBAT.orcStrikeDamage,
+    };
+  }
+
+  const canMove =
+    manhattanDistance(enemy.position, intent.target) === 1 &&
+    !impassable(state, intent.target, grid) &&
+    !enemyAt(state, intent.target) &&
+    !coordsEqual(state.player, intent.target);
+  if (!canMove) {
+    return {
+      state: withoutIntent(state, enemyId),
+      enemyId,
+      kind: 'wait',
+      from,
+      target: { ...intent.target },
+      damageAmount: 0,
+    };
+  }
+
+  const spikeDamage = terrainAt(state, intent.target) === 'spikes' ? COMBAT.spikeEntryDamage : 0;
+  const hp = enemy.hp - spikeDamage;
+  const killed = hp <= 0 ? { enemyId, position: { ...intent.target } } : undefined;
+  const enemies = state.enemies.flatMap((candidate) => {
+    if (candidate.id !== enemyId) return [candidate];
+    return killed ? [] : [{ ...candidate, position: { ...intent.target }, hp }];
+  });
+  const nextState = withoutIntent({
+    ...state,
+    enemies,
+    corpses: killed ? [...state.corpses, killed] : state.corpses,
+  }, enemyId);
+  return {
+    state: nextState,
+    enemyId,
+    kind: 'move',
+    from,
+    target: { ...intent.target },
+    damageAmount: spikeDamage,
+    ...(killed ? { killed } : {}),
+  };
+};
+
+export const finishEnemyTurn = (state: GameState): GameState => {
+  if (state.won) return state;
+  if (state.lost) return { ...state, intents: [] };
+  const next = { ...state, turn: state.turn + 1, moved: false, acted: false, intents: [] };
+  return withEnemyIntents(next);
+};
+
 /** Resolves committed intents in reading order, then opens the next player turn. */
 export const endPlayerTurn = (state: GameState, grid: GridSize = GRID_SIZE): GameState => {
-  if (state.won || state.lost || (!state.moved && !state.acted)) return state;
+  if (state.won || state.lost) return state;
   let next = state;
-  for (const enemy of [...next.enemies].sort(readingOrder)) {
-    if (enemy.stunnedTurns > 0) continue;
-    const intent = state.intents.find((candidate) => candidate.enemyId === enemy.id);
-    if (!intent) continue;
-    const current = next.enemies.find((candidate) => candidate.id === enemy.id);
-    if (!current) continue;
-    if (intent.kind === 'attack') {
-      if (coordsEqual(next.player, intent.target) && manhattanDistance(current.position, intent.target) === 1) {
-        next = { ...next, playerHp: Math.max(0, next.playerHp - COMBAT.orcStrikeDamage) };
-        if (next.playerHp === 0) break;
-      }
-    } else if (manhattanDistance(current.position, intent.target) === 1 && !impassable(next, intent.target, grid) && !enemyAt(next, intent.target) && !coordsEqual(next.player, intent.target)) {
-      next = { ...next, enemies: next.enemies.map((candidate) => candidate.id === current.id ? { ...candidate, position: { ...intent.target } } : candidate) };
-    }
+  for (const enemyId of enemyTurnOrder(state)) {
+    next = resolveEnemyAction(next, enemyId, grid).state;
+    if (next.lost) break;
   }
-  const enemies = next.enemies.map((enemy) => ({ ...enemy, stunnedTurns: Math.max(0, enemy.stunnedTurns - 1) }));
-  next = { ...next, enemies, turn: next.turn + 1, moved: false, acted: false, intents: [], lost: next.playerHp === 0 };
-  return next.lost ? next : withEnemyIntents(next);
+  return finishEnemyTurn(next);
 };
 
 export const resetGame = (): GameState => withEnemyIntents(createInitialState());
 
-const shortestStep = (state: GameState, enemy: Enemy, grid: GridSize): GridCoord | undefined => {
+const shortestStep = (state: GameState, enemy: Enemy, grid: GridSize): GridCoord | undefined =>
+  findShortestStep(state, enemy, grid, true) ?? findShortestStep(state, enemy, grid, false);
+
+const findShortestStep = (state: GameState, enemy: Enemy, grid: GridSize, avoidSpikes: boolean): GridCoord | undefined => {
   const occupied = state.enemies.filter((other) => other.id !== enemy.id).map((other) => other.position);
   const queue: Array<{ coord: GridCoord; first?: GridCoord }> = [{ coord: enemy.position }];
   const seen = new Set([`${enemy.position.col},${enemy.position.row}`]);
@@ -114,7 +213,13 @@ const shortestStep = (state: GameState, enemy: Enemy, grid: GridSize): GridCoord
     if (manhattanDistance(current.coord, state.player) === 1) return current.first;
     for (const candidate of neighbors(current.coord)) {
       const key = `${candidate.col},${candidate.row}`;
-      if (seen.has(key) || impassable(state, candidate, grid) || occupied.some((coord) => coordsEqual(coord, candidate)) || coordsEqual(candidate, state.player)) continue;
+      if (
+        seen.has(key) ||
+        impassable(state, candidate, grid) ||
+        occupied.some((coord) => coordsEqual(coord, candidate)) ||
+        coordsEqual(candidate, state.player) ||
+        (avoidSpikes && terrainAt(state, candidate) === 'spikes')
+      ) continue;
       seen.add(key);
       queue.push({ coord: candidate, first: current.first ?? candidate });
     }
@@ -122,6 +227,10 @@ const shortestStep = (state: GameState, enemy: Enemy, grid: GridSize): GridCoord
   return undefined;
 };
 const readingOrder = (a: Enemy, b: Enemy): number => a.position.row - b.position.row || a.position.col - b.position.col;
+const withoutIntent = (state: GameState, enemyId: string): GameState => ({
+  ...state,
+  intents: state.intents.filter((intent) => intent.enemyId !== enemyId),
+});
 const empty = (state: GameState): ActionResult => ({ state, damage: [], damageAmount: 0 });
 const damageEnemy = (state: GameState, target: GridCoord, amount: number, nextPosition: GridCoord = target, push?: Pick<ActionResult, 'pushedFrom' | 'pushedTo'>, stunnedIds: readonly string[] = []): ActionResult => {
   let killed: Corpse | undefined;

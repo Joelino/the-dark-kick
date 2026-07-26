@@ -5,14 +5,17 @@ import { allGridCoords, coordsEqual, type GridCoord } from '../game/grid';
 import { createTacticalLayout, GAME_HEIGHT, MIN_GAME_WIDTH, type TacticalLayout } from '../game/layout';
 import {
   basicStrike,
-  endPlayerTurn,
+  enemyTurnOrder,
+  finishEnemyTurn,
   kick,
   legalTargetsForAction,
   movePlayer,
   resetGame,
+  resolveEnemyAction,
   terrainAt,
   type Action,
   type ActionResult,
+  type EnemyActionResult,
 } from '../game/movement';
 import { type EnemyIntent, type GameState } from '../game/state';
 
@@ -44,6 +47,7 @@ export class TacticalScene extends Phaser.Scene {
   private pendingLayoutWidth?: number;
   private panelTab: 'order' | 'log' = 'order';
   private combatLog: string[] = ['T1 Objective: reach the exit.'];
+  private activeEnemyQueue?: readonly string[];
 
   constructor() {
     super('tactical-scene');
@@ -75,7 +79,12 @@ export class TacticalScene extends Phaser.Scene {
       .setOrigin(1, 0.5)
       .setDepth(22);
     this.feedback = this.add
-      .text(this.layout.logArea.x, this.layout.logArea.bodyY + 36, '', bodyStyle(this.layout.shortLandscape ? 15 : 13, '#c8bda8'))
+      .text(
+        this.layout.logArea.x,
+        this.layout.logArea.bodyY + 36,
+        '',
+        bodyStyle(this.layout.logArea.width < 180 ? 10 : this.layout.shortLandscape ? 15 : 13, '#c8bda8'),
+      )
       .setWordWrapWidth(this.layout.logArea.width)
       .setDepth(22);
     this.addHud();
@@ -121,35 +130,8 @@ export class TacticalScene extends Phaser.Scene {
 
   private renderInfoPanel(): void {
     if (!this.feedback) return;
-    if (this.panelTab === 'log') {
-      this.feedback.setText(this.combatLog.join('\n'));
-      return;
-    }
-
-    const player = `1  YOU     HP ${this.state.playerHp}/${COMBAT.playerMaxHealth}  ATK ${COMBAT.playerStrikeDamage}`;
-    const enemies = [...this.state.enemies].sort((a, b) => a.position.row - b.position.row || a.position.col - b.position.col).map((enemy, index) => {
-      const intent = this.state.intents.find((candidate) => candidate.enemyId === enemy.id);
-      const status = enemy.stunnedTurns > 0
-        ? 'STUNNED · SKIPS'
-        : intent?.kind === 'attack'
-          ? 'ATTACKS YOU'
-          : intent
-            ? `MOVES → ${intent.target.col},${intent.target.row}`
-            : 'NO ACTION';
-      return `${index + 2}  ${enemy.id === 'near-orc' ? 'NEAR' : enemy.id === 'far-orc' ? 'FAR' : 'ORC'}  HP ${enemy.hp}/${COMBAT.orcMaxHealth}  ATK ${COMBAT.orcStrikeDamage} · ${status}`;
-    });
-    this.feedback.setText([player, ...enemies].join('\n'));
-  }
-
-  private appendEnemySummary(before: GameState, after: GameState): void {
-    const damage = before.playerHp - after.playerHp;
-    const moves = before.enemies.filter((enemy) => {
-      const resolved = after.enemies.find((candidate) => candidate.id === enemy.id);
-      return resolved && !coordsEqual(enemy.position, resolved.position);
-    }).length;
-    const skipped = before.enemies.filter((enemy) => enemy.stunnedTurns > 0).length;
-    const facts = [damage > 0 ? `player -${damage} HP` : '', moves > 0 ? `${moves} orc move${moves === 1 ? '' : 's'}` : '', skipped > 0 ? `${skipped} stunned skip${skipped === 1 ? '' : 's'}` : ''].filter(Boolean);
-    this.appendCombatLog(`Enemies: ${facts.length ? facts.join(' · ') : 'no effect'}.`, before.turn);
+    this.feedback.setVisible(this.panelTab === 'log');
+    this.feedback.setText(this.panelTab === 'log' ? this.combatLog.join('\n') : '');
   }
 
   private addBackground(): void {
@@ -195,15 +177,20 @@ export class TacticalScene extends Phaser.Scene {
     this.addButton(x, actionYs[2], width, height, 'KICK', 'Push · collision damage', 'kick', () => this.selectAction('kick'));
     this.addButton(x - width * 0.26, resetY, width * 0.46, resetHeight, 'END TURN', '', undefined, () => this.finishPlayerTurn());
     this.addButton(x + width * 0.26, resetY, width * 0.46, resetHeight, 'RESET', '', undefined, () => this.reset());
-    this.addPanelTab(this.layout.logArea.x, this.layout.logArea.bodyY, 'TURN ORDER', 'order');
-    this.addPanelTab(this.layout.logArea.x + Math.min(132, this.layout.logArea.width * 0.54), this.layout.logArea.bodyY, 'COMBAT LOG', 'log');
+    const narrowReadout = this.layout.logArea.width < 180;
+    this.addPanelTab(this.layout.logArea.x, this.layout.logArea.bodyY, narrowReadout ? 'ORDER' : 'TURN ORDER', 'order');
+    this.addPanelTab(this.layout.logArea.x + Math.min(132, this.layout.logArea.width * 0.54), this.layout.logArea.bodyY, narrowReadout ? 'LOG' : 'COMBAT LOG', 'log');
+    if (this.panelTab === 'order') this.addTurnOrderCards();
+    this.renderInfoPanel();
   }
 
   private addPanelTab(x: number, y: number, label: string, tab: 'order' | 'log'): void {
     const active = this.panelTab === tab;
     const width = Math.min(122, this.layout.logArea.width * 0.48);
     const button = this.add.rectangle(x, y, width, 27, active ? 0x5d3c20 : 0x21191c).setOrigin(0).setStrokeStyle(1, active ? 0xe6b85c : 0x57454a);
-    const text = this.add.text(x + width / 2, y + 14, label, smallCapsStyle(this.layout.shortLandscape ? 11 : 10, active ? '#ffe0a1' : '#a99c91')).setOrigin(0.5);
+    const text = this.add
+      .text(x + width / 2, y + 14, label, smallCapsStyle(this.layout.logArea.width < 180 ? 9 : this.layout.shortLandscape ? 11 : 10, active ? '#ffe0a1' : '#a99c91'))
+      .setOrigin(0.5);
     for (const object of [button, text]) {
       object.setInteractive({ useHandCursor: true });
       object.on('pointerup', () => {
@@ -213,6 +200,86 @@ export class TacticalScene extends Phaser.Scene {
       });
       this.hudLayer?.add(object);
     }
+  }
+
+  private addTurnOrderCards(): void {
+    const enemies = [...this.state.enemies].sort((a, b) => a.position.row - b.position.row || a.position.col - b.position.col);
+    const queue = this.activeEnemyQueue
+      ? this.activeEnemyQueue.map((id) => ({ kind: 'enemy' as const, id }))
+      : [{ kind: 'player' as const, id: 'player' }, ...enemies.map((enemy) => ({ kind: 'enemy' as const, id: enemy.id }))];
+    const compact = !this.layout.hasSeparateLogPanel || this.layout.logArea.width < 180;
+    const cardHeight = compact ? (this.layout.shortLandscape ? 37 : 36) : 62;
+    const gap = compact ? 3 : 6;
+    const startY = this.layout.logArea.bodyY + 31;
+    const width = this.layout.logArea.width;
+    const narrowCard = width < 180;
+
+    queue.forEach((entry, index) => {
+      const y = startY + index * (cardHeight + gap);
+      const active = index === 0;
+      const background = this.add
+        .rectangle(this.layout.logArea.x, y, width, cardHeight, active ? 0x49311f : 0x171216, 0.98)
+        .setOrigin(0)
+        .setStrokeStyle(active ? 2 : 1, active ? 0xe6b85c : 0x4d3e43);
+      const portraitSize = Math.max(18, Math.min(cardHeight - 8, compact ? 28 : 42));
+      const portraitX = this.layout.logArea.x + 7 + portraitSize / 2;
+      const portraitY = y + cardHeight / 2;
+      const portraitBack = this.add.rectangle(portraitX, portraitY, portraitSize + 4, portraitSize + 4, active ? 0x271d16 : 0x0d0a0c).setStrokeStyle(1, active ? 0xb98d48 : 0x493b40);
+      const portrait = this.add
+        .sprite(portraitX, portraitY, entry.kind === 'player' ? 'rogues' : 'monsters', entry.kind === 'player' ? PLAYER_FRAME : ENEMY_FRAME)
+        .setScale(portraitSize / 32);
+      const textX = portraitX + portraitSize / 2 + 8;
+      const textWidth = width - (textX - this.layout.logArea.x) - 8;
+
+      let name = 'YOU';
+      let status = this.playerTurnStatus();
+      let stats = `HP ${this.state.playerHp}/${COMBAT.playerMaxHealth} · ATK ${COMBAT.playerStrikeDamage}`;
+      if (entry.kind === 'enemy') {
+        const enemy = this.state.enemies.find((candidate) => candidate.id === entry.id);
+        if (!enemy) return;
+        const intent = this.state.intents.find((candidate) => candidate.enemyId === enemy.id);
+        name = enemy.id === 'near-orc' ? (narrowCard ? 'NEAR' : 'NEAR ORC') : enemy.id === 'far-orc' ? (narrowCard ? 'FAR' : 'FAR ORC') : 'ORC';
+        stats = `HP ${enemy.hp}/${COMBAT.orcMaxHealth} · ATK ${COMBAT.orcStrikeDamage}`;
+        status = enemy.stunnedTurns > 0
+          ? narrowCard ? 'STUN · SKIP' : 'STUNNED · SKIPS'
+          : intent?.kind === 'attack'
+            ? narrowCard ? 'ATTACK YOU' : 'STRIKE → YOU'
+            : intent
+              ? narrowCard ? `MOVE ${intent.target.col},${intent.target.row}` : `MOVE → ${intent.target.col},${intent.target.row}`
+              : 'WAIT';
+      } else if (narrowCard && status === 'MOVE + ACTION') {
+        status = 'MOVE + ACT';
+      }
+      if (!compact) name += `  ·  ${stats}`;
+
+      const nameText = this.add
+        .text(textX, compact ? y + 2 : y + 10, name, smallCapsStyle(compact ? (narrowCard ? 9 : 10) : 14, active ? '#ffe0a1' : '#d8cabc'))
+        .setOrigin(0)
+        .setWordWrapWidth(textWidth);
+      const statsText = compact
+        ? this.add
+            .text(textX, y + 14, stats, smallCapsStyle(narrowCard ? 7 : 8, active ? '#d8c6a1' : '#9d9190'))
+            .setOrigin(0)
+            .setWordWrapWidth(textWidth)
+        : undefined;
+      const statusText = this.add
+        .text(textX, compact ? y + cardHeight - 2 : y + 38, status, smallCapsStyle(compact ? (narrowCard ? 7 : 8) : 11, active ? '#e6b85c' : '#8f8580'))
+        .setOrigin(0, compact ? 1 : 0.5)
+        .setWordWrapWidth(textWidth);
+      const objects: Phaser.GameObjects.GameObject[] = [background, portraitBack, portrait, nameText, statusText];
+      if (statsText) objects.push(statsText);
+      if (active && !compact) {
+        objects.push(this.add.text(this.layout.logArea.x + width - 9, y + 9, 'NEXT', smallCapsStyle(9, '#ffe0a1')).setOrigin(1, 0));
+      }
+      this.hudLayer?.add(objects);
+    });
+  }
+
+  private playerTurnStatus(): string {
+    if (this.state.moved && this.state.acted) return 'TURN ENDING';
+    if (this.state.moved) return 'ACTION LEFT';
+    if (this.state.acted) return 'MOVE LEFT';
+    return 'MOVE + ACTION';
   }
 
   private addButton(
@@ -225,23 +292,30 @@ export class TacticalScene extends Phaser.Scene {
     action: Action | undefined,
     onTap: () => void,
   ): void {
-    const active = action === this.selectedAction;
+    const completed = action === 'move' ? this.state.moved : action !== undefined ? this.state.acted : false;
+    const active = !completed && action === this.selectedAction;
     const button = this.add
-      .rectangle(x, y, width, height, active ? 0x5d3c20 : 0x21191c, 1)
-      .setStrokeStyle(active ? 3 : 2, active ? 0xe6b85c : 0x57454a);
+      .rectangle(x, y, width, height, completed ? 0x171316 : active ? 0x5d3c20 : 0x21191c, 1)
+      .setStrokeStyle(active ? 3 : 2, completed ? 0x3d3438 : active ? 0xe6b85c : 0x57454a);
     const labelY = detail ? y - 9 : y;
+    const centeredLabel = detail.length === 0;
+    const labelSize = centeredLabel ? (this.layout.shortLandscape ? 15 : 14) : this.layout.shortLandscape ? 19 : 17;
     const text = this.add
-      .text(x - width / 2 + 17, labelY, label, smallCapsStyle(this.layout.shortLandscape ? 19 : 17, active ? '#ffe0a1' : '#e4d9ca'))
-      .setOrigin(0, 0.5);
+      .text(centeredLabel ? x : x - width / 2 + 17, labelY, `${label}${completed ? '  ✓' : ''}`, smallCapsStyle(labelSize, completed ? '#71686a' : active ? '#ffe0a1' : '#e4d9ca'))
+      .setOrigin(centeredLabel ? 0.5 : 0, 0.5);
     const detailText = detail
-      ? this.add.text(x - width / 2 + 17, y + 13, detail, bodyStyle(this.layout.shortLandscape ? 13 : 11, active ? '#dcb875' : '#8f8580')).setOrigin(0, 0.5)
+      ? this.add.text(x - width / 2 + 17, y + 13, detail, bodyStyle(this.layout.shortLandscape ? 13 : 11, completed ? '#5f585a' : active ? '#dcb875' : '#8f8580')).setOrigin(0, 0.5)
       : undefined;
-    const pip = action ? this.add.circle(x + width / 2 - 18, y, 5, active ? 0xffcc66 : 0x5c4d4f, 1) : undefined;
+    const pip = action ? this.add.circle(x + width / 2 - 18, y, 5, completed ? 0x47705d : active ? 0xffcc66 : 0x5c4d4f, 1) : undefined;
 
     const objects: Phaser.GameObjects.GameObject[] = [button, text];
     if (detailText) objects.push(detailText);
     if (pip) objects.push(pip);
     for (const object of objects) {
+      if (completed) {
+        this.hudLayer?.add(object);
+        continue;
+      }
       object.setInteractive({ useHandCursor: true });
       object.on('pointerup', onTap);
       object.on('pointerover', () => button.setFillStyle(active ? 0x6a4728 : 0x302226));
@@ -251,7 +325,12 @@ export class TacticalScene extends Phaser.Scene {
   }
 
   private selectAction(action: Action): void {
-    if (this.state.won || this.inputLocked) return;
+    if (
+      this.state.won ||
+      this.state.lost ||
+      this.inputLocked ||
+      (action === 'move' ? this.state.moved : this.state.acted)
+    ) return;
     this.selectedAction = action;
     this.addHud();
     this.renderBoard();
@@ -264,6 +343,7 @@ export class TacticalScene extends Phaser.Scene {
     this.selectedAction = 'move';
     this.panelTab = 'order';
     this.combatLog = ['T1 Objective: reach the exit.'];
+    this.activeEnemyQueue = undefined;
     this.addHud();
     this.renderBoard();
   }
@@ -275,7 +355,7 @@ export class TacticalScene extends Phaser.Scene {
     this.tileLayer = this.add.container(0, 0).setDepth(10);
     this.enemySprites.clear();
     this.playerSprite = undefined;
-    this.turnText?.setText(`TURN ${this.state.turn}  ·  HP ${this.state.playerHp}/${COMBAT.playerMaxHealth}`);
+    this.turnText?.setText(`TURN ${this.state.turn}  ·  ${this.activeEnemyQueue ? 'ENEMIES' : 'YOU'}  ·  HP ${this.state.playerHp}/${COMBAT.playerMaxHealth}`);
     this.renderInfoPanel();
     const { spriteScale, tileSize } = this.layout;
 
@@ -322,9 +402,9 @@ export class TacticalScene extends Phaser.Scene {
     }
 
     for (const corpse of this.state.corpses) this.addCorpse(corpse.position, corpse.enemyId);
-    for (const intent of this.state.intents) this.addIntent(intent);
     for (const enemy of this.state.enemies) this.addEnemy(enemy.id, enemy.position, enemy.hp, enemy.stunnedTurns > 0);
     this.addPlayer(this.state.player);
+    for (const intent of this.state.intents) this.addIntent(intent);
 
     if (this.state.won || this.state.lost) this.showEndPanel();
   }
@@ -348,10 +428,24 @@ export class TacticalScene extends Phaser.Scene {
     if (!enemy) return;
     const from = this.gridToWorld(enemy.position);
     const to = this.gridToWorld(intent.target);
-    const marker = intent.kind === 'attack'
-      ? this.add.text(to.x, to.y, '✦', smallCapsStyle(34, '#ff655f')).setOrigin(0.5).setStroke('#2a0707', 5)
-      : this.add.text((from.x + to.x) / 2, (from.y + to.y) / 2, '➜', smallCapsStyle(30, '#f0b85c')).setOrigin(0.5).setAngle(Phaser.Math.RadToDeg(Math.atan2(to.y - from.y, to.x - from.x)));
-    marker.setAlpha(0.92);
+    if (intent.kind === 'attack') {
+      const { tileSize } = this.layout;
+      const target = this.add
+        .rectangle(to.x, to.y, tileSize - 8, tileSize - 8, 0xa5262e, 0.08)
+        .setStrokeStyle(3, 0xff655f, 0.9);
+      const badge = this.add
+        .rectangle(to.x, to.y + tileSize * 0.41, Math.min(58, tileSize - 10), 15, 0x56151b, 0.96)
+        .setStrokeStyle(1, 0xff8a7c, 0.95);
+      const label = this.add.text(to.x, badge.y, 'ATTACK', smallCapsStyle(this.layout.shortLandscape ? 9 : 8, '#ffd0be')).setOrigin(0.5);
+      this.tileLayer?.add([target, badge, label]);
+      return;
+    }
+
+    const marker = this.add
+      .text((from.x + to.x) / 2, (from.y + to.y) / 2, '➜', smallCapsStyle(30, '#f0b85c'))
+      .setOrigin(0.5)
+      .setAngle(Phaser.Math.RadToDeg(Math.atan2(to.y - from.y, to.x - from.x)))
+      .setAlpha(0.92);
     this.tileLayer?.add(marker);
   }
 
@@ -379,10 +473,15 @@ export class TacticalScene extends Phaser.Scene {
   private addPlayer(position: GridCoord): void {
     const world = this.gridToWorld(position);
     const { spriteScale, tileSize } = this.layout;
+    const hpWidth = tileSize * 0.72;
     const shadow = this.add.ellipse(world.x, world.y + tileSize * 0.34, tileSize * 0.59, tileSize * 0.19, 0x050405, 0.72);
     const ring = this.add.circle(world.x, world.y + 3, tileSize * 0.42, 0x9ac7bc, 0.08).setStrokeStyle(2, 0x9ac7bc, 0.55);
     this.playerSprite = this.add.sprite(world.x, world.y - 2, 'rogues', PLAYER_FRAME).setScale(spriteScale);
-    this.tileLayer?.add([shadow, ring, this.playerSprite]);
+    const hpBack = this.add.rectangle(world.x, world.y - tileSize * 0.45, hpWidth, 7, 0x0b1112, 0.95).setStrokeStyle(1, 0x3f625d);
+    const hpFill = this.add
+      .rectangle(world.x - hpWidth / 2 + 1, world.y - tileSize * 0.45, ((hpWidth - 2) * this.state.playerHp) / COMBAT.playerMaxHealth, 5, 0x5aa58e, 1)
+      .setOrigin(0, 0.5);
+    this.tileLayer?.add([shadow, ring, this.playerSprite, hpBack, hpFill]);
   }
 
   private async handleTileTap(coord: GridCoord): Promise<void> {
@@ -401,8 +500,16 @@ export class TacticalScene extends Phaser.Scene {
 
     this.inputLocked = true;
     if (action === 'move') {
-      this.appendCombatLog(nextState.won ? 'You: exit reached.' : `You: move to ${coord.col},${coord.row}.`);
+      const spikeDamage = before.playerHp - nextState.playerHp;
+      this.appendCombatLog(
+        nextState.won
+          ? 'You: exit reached.'
+          : `You: move to ${coord.col},${coord.row}${spikeDamage > 0 ? ` · ${spikeDamage} spike damage` : ''}.`,
+      );
       await this.animateMove(before.player, coord);
+      if (spikeDamage > 0 && this.playerSprite) {
+        await this.animatePlayerHit(this.playerSprite, this.gridToWorld(coord), spikeDamage);
+      }
     } else if (result) {
       this.appendCombatLog(
         action === 'strike'
@@ -413,15 +520,13 @@ export class TacticalScene extends Phaser.Scene {
     }
 
     this.state = nextState;
-    if (this.state.moved && this.state.acted) {
+    if (this.state.moved && this.state.acted && !this.state.won && !this.state.lost) {
       // Render the resolved player action before consuming stun in the enemy
       // phase. In particular, a move-then-kick must not erase its static stun
       // marker in the same frame in which it is applied.
       this.renderBoard();
-      await this.delay(420);
-      const beforeEnemies = this.state;
-      this.state = endPlayerTurn(this.state);
-      this.appendEnemySummary(beforeEnemies, this.state);
+      await this.delay(280);
+      await this.playEnemyTurn();
     }
     this.selectedAction = this.state.acted ? 'move' : this.state.moved ? 'strike' : 'move';
     this.addHud();
@@ -431,20 +536,61 @@ export class TacticalScene extends Phaser.Scene {
   }
 
   private async finishPlayerTurn(): Promise<void> {
-    if (this.inputLocked) return;
-    if (!this.state.moved && !this.state.acted) {
-      return;
-    }
+    if (this.inputLocked || this.state.won || this.state.lost) return;
     this.inputLocked = true;
-    await this.delay(420);
-    const beforeEnemies = this.state;
-    this.state = endPlayerTurn(this.state);
-    this.appendEnemySummary(beforeEnemies, this.state);
+    await this.delay(180);
+    await this.playEnemyTurn();
     this.selectedAction = 'move';
     this.addHud();
     this.renderBoard();
     this.inputLocked = false;
     this.flushPendingLayout();
+  }
+
+  private async playEnemyTurn(): Promise<void> {
+    const queue = [...enemyTurnOrder(this.state)];
+    this.activeEnemyQueue = queue;
+    this.addHud();
+    this.renderBoard();
+
+    for (let index = 0; index < queue.length; index += 1) {
+      const enemyId = queue[index];
+      const result = resolveEnemyAction(this.state, enemyId);
+      await this.animateEnemyAction(result);
+      this.state = result.state;
+      this.appendEnemyAction(result);
+      this.activeEnemyQueue = queue.slice(index + 1);
+      this.addHud();
+      this.renderBoard();
+      if (this.state.lost) break;
+      await this.delay(110);
+    }
+
+    this.state = finishEnemyTurn(this.state);
+    this.activeEnemyQueue = undefined;
+  }
+
+  private appendEnemyAction(result: EnemyActionResult): void {
+    const name = result.enemyId === 'near-orc' ? 'Near Orc' : result.enemyId === 'far-orc' ? 'Far Orc' : 'Orc';
+    if (result.kind === 'attack') {
+      this.appendCombatLog(`${name}: strike · ${result.damageAmount} damage · you have ${result.state.playerHp}/${COMBAT.playerMaxHealth} HP.`);
+      return;
+    }
+    if (result.kind === 'move' && result.target) {
+      this.appendCombatLog(
+        `${name}: move to ${result.target.col},${result.target.row}${result.damageAmount > 0 ? ` · ${result.damageAmount} spike damage` : ''}${result.killed ? ' · dies' : ''}.`,
+      );
+      return;
+    }
+    if (result.kind === 'miss') {
+      this.appendCombatLog(`${name}: strikes your old position · misses.`);
+      return;
+    }
+    if (result.kind === 'stunned') {
+      this.appendCombatLog(`${name}: stunned · skips.`);
+      return;
+    }
+    this.appendCombatLog(`${name}: blocked · waits.`);
   }
 
   private async animateMove(from: GridCoord, to: GridCoord): Promise<void> {
@@ -467,6 +613,95 @@ export class TacticalScene extends Phaser.Scene {
     await this.tween({ targets: sprite, x: end.x, y: end.y - 2, scaleX: scale * 1.06, scaleY: scale * 0.94, duration: 92, ease: 'Quad.In' });
     await this.tween({ targets: sprite, scaleX: scale, scaleY: scale, duration: 55, ease: 'Back.Out' });
     this.spawnDust(end.x, end.y + 23);
+  }
+
+  private async animateEnemyAction(result: EnemyActionResult): Promise<void> {
+    const sprite = this.enemySprites.get(result.enemyId);
+    if (!sprite) return;
+    const scale = this.layout.spriteScale;
+
+    if (result.kind === 'stunned') {
+      sprite.setTint(0xffe36e);
+      await this.tween({ targets: sprite, angle: { from: -5, to: 5 }, y: sprite.y - 4, duration: 95, yoyo: true, repeat: 2, ease: 'Sine.InOut' });
+      sprite.clearTint();
+      sprite.setAngle(0);
+      return;
+    }
+
+    if (result.kind === 'wait') {
+      await this.tween({ targets: sprite, scaleY: scale * 0.88, alpha: 0.7, duration: 120, yoyo: true, ease: 'Sine.InOut' });
+      return;
+    }
+
+    if (result.kind === 'move' && result.target) {
+      const start = this.gridToWorld(result.from);
+      const end = this.gridToWorld(result.target);
+      sprite.setFlipX(result.target.col < result.from.col);
+      await this.tween({
+        targets: sprite,
+        x: Phaser.Math.Linear(start.x, end.x, 0.52),
+        y: Phaser.Math.Linear(start.y, end.y, 0.52) - 9,
+        scaleX: scale * 0.91,
+        scaleY: scale * 1.09,
+        duration: 105,
+        ease: 'Quad.Out',
+      });
+      await this.tween({ targets: sprite, x: end.x, y: end.y - 2, scaleX: scale * 1.06, scaleY: scale * 0.94, duration: 115, ease: 'Quad.In' });
+      await this.tween({ targets: sprite, scaleX: scale, scaleY: scale, duration: 55, ease: 'Back.Out' });
+      this.spawnDust(end.x, end.y + 23);
+      if (result.damageAmount > 0) await this.animateHit(sprite, end, result.damageAmount, result.killed !== undefined);
+      return;
+    }
+
+    if (!result.target) return;
+    const start = this.gridToWorld(result.from);
+    const target = this.gridToWorld(result.target);
+    const dx = target.x - start.x;
+    const dy = target.y - start.y;
+    sprite.setFlipX(dx < 0);
+
+    await this.tween({
+      targets: sprite,
+      x: start.x - dx * 0.08,
+      y: start.y - dy * 0.08 - 3,
+      angle: -6 * Math.sign(dx || -dy),
+      scaleX: scale * 0.93,
+      scaleY: scale * 1.08,
+      duration: 95,
+      ease: 'Quad.Out',
+    });
+    await this.tween({
+      targets: sprite,
+      x: start.x + dx * 0.54,
+      y: start.y + dy * 0.54 - 2,
+      angle: 10 * Math.sign(dx || -dy),
+      scaleX: scale * 1.11,
+      scaleY: scale * 0.89,
+      duration: 92,
+      ease: 'Cubic.In',
+    });
+    this.spawnEnemySlash(target, result.kind === 'miss');
+    this.cameras.main.shake(result.kind === 'attack' ? 92 : 55, result.kind === 'attack' ? 0.003 : 0.0015);
+    if (result.kind === 'attack' && this.playerSprite) {
+      await this.animatePlayerHit(this.playerSprite, target, result.damageAmount);
+    } else {
+      await this.delay(90);
+    }
+    await this.tween({ targets: sprite, x: start.x, y: start.y - 2, angle: 0, scaleX: scale, scaleY: scale, duration: 135, ease: 'Back.Out' });
+  }
+
+  private async animatePlayerHit(sprite: Phaser.GameObjects.Sprite, position: Phaser.Math.Vector2, damage: number): Promise<void> {
+    const scale = this.layout.spriteScale;
+    sprite.setTintFill(0xff8b75);
+    const damageText = this.add.text(position.x, position.y - 24, `-${damage}`, smallCapsStyle(this.layout.shortLandscape ? 23 : 20, '#ff8b75')).setOrigin(0.5);
+    this.effectsLayer?.add(damageText);
+    void this.tween({ targets: damageText, y: position.y - 67, alpha: 0, duration: 500, ease: 'Cubic.Out', onComplete: () => damageText.destroy() });
+    const ring = this.add.circle(position.x, position.y, 10, 0xff655f, 0.05).setStrokeStyle(5, 0xff655f, 0.95);
+    this.effectsLayer?.add(ring);
+    void this.tween({ targets: ring, scale: 3, alpha: 0, duration: 230, ease: 'Quad.Out', onComplete: () => ring.destroy() });
+    await this.tween({ targets: sprite, x: position.x + 6, scaleX: scale * 1.15, scaleY: scale * 0.78, duration: 48, yoyo: true, repeat: 2, ease: 'Sine.InOut' });
+    sprite.clearTint();
+    sprite.setPosition(position.x, position.y - 2).setScale(scale);
   }
 
   private async animateAttack(action: Exclude<Action, 'move'>, before: GameState, target: GridCoord, result: ActionResult): Promise<void> {
@@ -529,9 +764,11 @@ export class TacticalScene extends Phaser.Scene {
   private async animateHit(sprite: Phaser.GameObjects.Sprite, position: Phaser.Math.Vector2, damage: number, killed: boolean): Promise<void> {
     const scale = this.layout.spriteScale;
     sprite.setTintFill(0xfff0cf);
-    const damageText = this.add.text(position.x, position.y - 24, `-${damage}`, smallCapsStyle(this.layout.shortLandscape ? 23 : 20, '#ffce78')).setOrigin(0.5);
-    this.effectsLayer?.add(damageText);
-    void this.tween({ targets: damageText, y: position.y - 67, alpha: 0, duration: 500, ease: 'Cubic.Out', onComplete: () => damageText.destroy() });
+    if (damage > 0) {
+      const damageText = this.add.text(position.x, position.y - 24, `-${damage}`, smallCapsStyle(this.layout.shortLandscape ? 23 : 20, '#ffce78')).setOrigin(0.5);
+      this.effectsLayer?.add(damageText);
+      void this.tween({ targets: damageText, y: position.y - 67, alpha: 0, duration: 500, ease: 'Cubic.Out', onComplete: () => damageText.destroy() });
+    }
 
     const ring = this.add.circle(position.x, position.y, 10, 0xf6c365, 0.05).setStrokeStyle(5, 0xf6c365, 0.95);
     this.effectsLayer?.add(ring);
@@ -563,6 +800,13 @@ export class TacticalScene extends Phaser.Scene {
     const echo = this.add.rectangle(position.x, position.y, 3, 44, 0xffffff, 0.78).setAngle(action === 'kick' ? 62 : -38);
     this.effectsLayer?.add([slash, echo]);
     void this.tween({ targets: [slash, echo], scaleY: 1.45, alpha: 0, duration: 170, ease: 'Quad.Out', onComplete: () => [slash, echo].forEach((object) => object.destroy()) });
+  }
+
+  private spawnEnemySlash(position: Phaser.Math.Vector2, missed: boolean): void {
+    const slash = this.add.rectangle(position.x, position.y, 6, 58, missed ? 0x9d8583 : 0xff655f, 0.95).setAngle(-45);
+    const echo = this.add.rectangle(position.x, position.y, 3, 42, missed ? 0xc2aaa7 : 0xffc0a8, 0.72).setAngle(48);
+    this.effectsLayer?.add([slash, echo]);
+    void this.tween({ targets: [slash, echo], scaleY: 1.4, alpha: 0, duration: 190, ease: 'Quad.Out', onComplete: () => [slash, echo].forEach((object) => object.destroy()) });
   }
 
   private spawnDust(x: number, y: number): void {
@@ -604,7 +848,7 @@ export class TacticalScene extends Phaser.Scene {
     const shade = this.add.rectangle(this.layout.gameWidth / 2, GAME_HEIGHT / 2, this.layout.gameWidth, GAME_HEIGHT, 0x070507, 0.72);
     const panel = this.add.rectangle(centerX, GAME_HEIGHT / 2, 382, 220, 0x171116, 0.98).setStrokeStyle(3, 0xd2a855);
     const title = this.add.text(centerX, 218, this.state.won ? 'CELLAR CLEARED' : 'FALLEN', smallCapsStyle(27, '#f3d28e')).setOrigin(0.5);
-    const turns = this.add.text(centerX, 263, `${this.state.turn - 1} turns · the dark waits below`, bodyStyle(15, '#b7a896')).setOrigin(0.5);
+    const turns = this.add.text(centerX, 263, `Turn ${this.state.turn} · the dark waits below`, bodyStyle(15, '#b7a896')).setOrigin(0.5);
     const button = this.add.rectangle(centerX, 325, 184, 48, 0x5d3c20, 1).setStrokeStyle(3, 0xe6b85c);
     const label = this.add.text(centerX, 325, 'DESCEND AGAIN', smallCapsStyle(15, '#ffe0a1')).setOrigin(0.5);
     for (const object of [button, label]) {

@@ -2,7 +2,7 @@
 
 Touch-first tactical game interaction prototype.
 
-The current first-level rules and proposed enemy-turn iteration are documented in [`LEVEL.md`](./LEVEL.md).
+The current first-level rules are documented in [`LEVEL.md`](./LEVEL.md).
 
 ## Current prototype
 
@@ -10,9 +10,9 @@ The current build is a landscape-oriented Phaser 3 prototype with an 8-column by
 
 A fighter starts near the left side of a 32rogues-styled dungeon board, an exit staircase sits near the right side, and two 4 HP orcs close in from near and far positions. Terrain and occupants are separate: the exit and spikes are traversable terrain, while walls and enemy occupants block movement.
 
-The tactical readout opens on **Turn Order**, listing the player and living orcs with HP, attack, and their next action. A **Combat Log** tab keeps the latest four factual results without replacing the default unit overview. A small date-and-branch build label beneath the title makes deployed playtest versions easy to identify.
+The tactical readout opens on **Turn Order** as a top-to-bottom stack of portrait cards showing each unit's health and attack strength. The top card is the next unit to resolve, and cards leave the stack as the enemy phase advances. The player also has a health bar above their board sprite. A **Combat Log** tab keeps the latest four factual results without replacing the default unit overview. A small date-and-branch build label beneath the title makes deployed playtest versions easy to identify.
 
-Movement, Strike, and Kick use short squash-and-stretch action sequences. Hits add impact flashes, damage numbers, particles, and camera shake. Lethal hits collapse the enemy into a bloodied corpse that stays on its death tile for the rest of the run.
+Player and enemy movement and attacks use short squash-and-stretch action sequences. Enemy turns resolve one unit at a time with visible movement, strike, miss, wait, and stun-skip feedback. Hits add impact flashes, damage numbers, particles, and camera shake. Lethal hits collapse the enemy into a bloodied corpse that stays on its death tile for the rest of the run.
 
 ## Controls and rules
 
@@ -21,7 +21,8 @@ Use taps only; drag gestures are not required.
 - Each player turn allows one highlighted orthogonal **Move** and one **action** in either order. The action is either **Strike** or **Kick**; use **End Turn** to give up an unused move or action.
 - **Basic Strike** targets an orthogonally adjacent enemy and deals 1 damage.
 - **Kick** targets an orthogonally adjacent enemy. Open floor repositions it for 0 damage; a wall or board edge deals 1 collision damage and stuns it; colliding with another enemy stuns both and deals 1 to the pushed enemy; a spike landing combines 1 impact damage with the 3 spike bonus and kills a full-health orc.
-- Each orc shows exactly one committed intent: a gold movement arrow or red attack marker. It then takes one action, moving along a deterministic shortest path or striking an adjacent player for 1 damage.
+- Each orc shows exactly one committed intent: a gold movement arrow or a red outlined target tile labeled **ATTACK**. The marker disappears when that committed action resolves. The orc then takes one action, moving along a deterministic shortest path or striking an adjacent player for 1 damage.
+- Spikes deal 3 damage whenever a player or enemy enters them. Orc pathfinding takes a safe route when one exists and crosses spikes only when no safe path is available. A forced spike Kick also includes its 1 impact damage, for 4 total.
 - Stunned enemies show persistent gold stars, have no intent, and skip their next action.
 - Killing the enemy is optional; the level is completed by reaching the exit.
 

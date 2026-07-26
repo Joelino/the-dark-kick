@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { COMBAT } from '../config/combat';
-import { basicStrike, chooseEnemyIntents, endPlayerTurn, enemyAt, kick, movePlayer, resetGame, withEnemyIntents } from './movement';
+import {
+  basicStrike,
+  chooseEnemyIntents,
+  endPlayerTurn,
+  enemyAt,
+  kick,
+  movePlayer,
+  resetGame,
+  resolveEnemyAction,
+  withEnemyIntents,
+} from './movement';
 import type { GameState } from './state';
 
 const scenario = (partial: Partial<GameState> = {}): GameState => withEnemyIntents({
@@ -32,6 +42,15 @@ describe('strict player and enemy turns', () => {
     const resolved = endPlayerTurn({ ...state, moved: true });
     expect(resolved.playerHp).toBe(COMBAT.playerMaxHealth - COMBAT.orcStrikeDamage);
     expect(enemyAt(resolved, { col: 7, row: 3 })?.id).toBe('far');
+  });
+
+  it('allows ending a turn without moving or acting', () => {
+    const state = scenario({ player: { col: 1, row: 2 }, enemies: [orc('orc', 3, 2)] });
+    const next = endPlayerTurn(state);
+
+    expect(next).not.toBe(state);
+    expect(next.turn).toBe(2);
+    expect(enemyAt(next, { col: 2, row: 2 })?.id).toBe('orc');
   });
 });
 
@@ -71,5 +90,56 @@ describe('kick payoffs and stun', () => {
     expect(result.damageAmount).toBe(COMBAT.wallCollisionDamage + COMBAT.spikePushDamage);
     expect(result.state.enemies).toHaveLength(0);
     expect(result.state.corpses.at(-1)?.position).toEqual({ col: 3, row: 2 });
+  });
+});
+
+describe('spike entry and hazard-aware pathfinding', () => {
+  it('damages the player when they walk onto spikes', () => {
+    const state = scenario({ player: { col: 0, row: 2 }, spikes: [{ col: 1, row: 2 }] });
+    const moved = movePlayer(state, { col: 1, row: 2 });
+
+    expect(moved.playerHp).toBe(COMBAT.playerMaxHealth - COMBAT.spikeEntryDamage);
+    expect(moved.player).toEqual({ col: 1, row: 2 });
+  });
+
+  it('damages an enemy that has no safe choice and walks onto spikes', () => {
+    const state: GameState = {
+      ...scenario({
+        player: { col: 3, row: 2 },
+        spikes: [{ col: 1, row: 2 }],
+        enemies: [orc('orc', 0, 2)],
+      }),
+      intents: [{ enemyId: 'orc', kind: 'move', target: { col: 1, row: 2 } }],
+    };
+    const result = resolveEnemyAction(state, 'orc');
+
+    expect(result.kind).toBe('move');
+    expect(result.damageAmount).toBe(COMBAT.spikeEntryDamage);
+    expect(enemyAt(result.state, { col: 1, row: 2 })?.hp).toBe(COMBAT.orcMaxHealth - COMBAT.spikeEntryDamage);
+  });
+
+  it('routes around spikes when a safe path exists', () => {
+    const state = scenario({
+      player: { col: 4, row: 2 },
+      spikes: [{ col: 1, row: 2 }],
+      enemies: [orc('orc', 0, 2)],
+    });
+
+    expect(chooseEnemyIntents(state)).toEqual([
+      { enemyId: 'orc', kind: 'move', target: { col: 0, row: 1 } },
+    ]);
+  });
+
+  it('crosses spikes when every safe route is blocked', () => {
+    const state = scenario({
+      player: { col: 2, row: 2 },
+      walls: [{ col: 0, row: 1 }, { col: 0, row: 3 }],
+      spikes: [{ col: 1, row: 2 }],
+      enemies: [orc('orc', 0, 2)],
+    });
+
+    expect(chooseEnemyIntents(state)).toEqual([
+      { enemyId: 'orc', kind: 'move', target: { col: 1, row: 2 } },
+    ]);
   });
 });

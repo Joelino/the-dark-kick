@@ -40,6 +40,12 @@ exist that isn't damage, making "damage vs tempo" the choice every turn.
 **Full spec:** see `CURRENT_PR.md`.
 **Verdict:** _pending playtest._
 
+**Playtest flag for the next spec:** close-range player/orc interaction currently
+feels weird. Capture exact reproduction turns before changing rules, especially
+around adjacency/body-blocking, committed intent after movement or Kick, action
+cadence, and whether lunges make unit positions look misleading. Resolve this
+M1 readability/game-feel issue before adding another enemy behavior.
+
 ---
 
 ## Next — sketched as questions (rough approach only)

@@ -100,3 +100,27 @@ Use `npm ci` in CI when a lockfile is present.
 Add or update tests for every rule change. Never claim a command passed unless it completed successfully. Environment-only failures, such as a blocked browser download, should be reported separately from project failures.
 
 Keep README documentation accurate after each iteration.
+
+## Post-implementation QA pass
+
+After implementation and automated checks, perform a short adversarial QA pass
+against the running game:
+
+1. Turn each acceptance criterion into an observable behavior and verify it.
+2. Exercise at least one phone-landscape viewport. For UI or animation changes,
+   use an available browser-control tool to interact with the built result and
+   inspect still frames during transitions.
+3. Cover the happy path plus reasonable edge cases the spec may not spell out:
+   skipping optional steps, repeating/illegal input, entering hazards normally,
+   interrupted intents, defeat/victory, reset, and responsive layout.
+4. Look for contradictions between numeric requirements and promised outcomes.
+   Resolve only when there is a clear product-consistent interpretation;
+   otherwise leave the behavior unchanged and flag the decision.
+5. Create or update `QA_NOTES.md` with the behaviors checked, evidence available,
+   assumptions made, environment limitations, and anything that still needs a
+   human playtest.
+
+If the environment has no controllable browser, say exactly that in
+`QA_NOTES.md`, complete the strongest rule/build checks available, and do not
+claim visual or interaction verification. Browser QA complements the physical
+iPhone playtest; it does not replace the judgment of whether the game is fun.
