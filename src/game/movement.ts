@@ -60,7 +60,10 @@ export const kick = (state: GameState, target: GridCoord, grid: GridSize = GRID_
   } else {
     nextPosition = destination;
     pushedTo = destination;
-    if (terrainAt(state, destination) === 'spikes') damage += COMBAT.spikePushDamage;
+    // A spike landing has the same 1-point impact as hitting solid terrain,
+    // plus the configured spike bonus. This preserves the specified +3 bonus
+    // while making the promised full-health-orc spike kill total 4 damage.
+    if (terrainAt(state, destination) === 'spikes') damage += COMBAT.wallCollisionDamage + COMBAT.spikePushDamage;
   }
   return damageEnemy(state, target, damage, nextPosition, pushedTo ? { pushedFrom: target, pushedTo } : undefined, stunnedIds);
 };

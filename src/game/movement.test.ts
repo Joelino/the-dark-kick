@@ -65,12 +65,10 @@ describe('kick payoffs and stun', () => {
     ]);
   });
 
-  it('deals three damage when forced onto spikes, killing a previously struck orc', () => {
-    let state = scenario({ player: { col: 1, row: 2 }, spikes: [{ col: 3, row: 2 }], enemies: [orc('orc', 2, 2)] });
-    state = basicStrike(state, { col: 2, row: 2 }).state;
-    state = { ...state, acted: false };
+  it('combines the three-point spike bonus with impact to kill a full-health orc', () => {
+    const state = scenario({ player: { col: 1, row: 2 }, spikes: [{ col: 3, row: 2 }], enemies: [orc('orc', 2, 2)] });
     const result = kick(state, { col: 2, row: 2 });
-    expect(result.damageAmount).toBe(3);
+    expect(result.damageAmount).toBe(COMBAT.wallCollisionDamage + COMBAT.spikePushDamage);
     expect(result.state.enemies).toHaveLength(0);
     expect(result.state.corpses.at(-1)?.position).toEqual({ col: 3, row: 2 });
   });

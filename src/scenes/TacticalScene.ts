@@ -155,7 +155,7 @@ export class TacticalScene extends Phaser.Scene {
 
     const { actionYs, height, resetHeight, resetY, width, x } = this.layout.buttons;
     this.addButton(x, actionYs[0], width, height, 'MOVE', 'Step to an adjacent tile', 'move', () => this.selectAction('move'));
-    this.addButton(x, actionYs[1], width, height, 'STRIKE', '1 damage · adjacent', 'strike', () => this.selectAction('strike'));
+    this.addButton(x, actionYs[1], width, height, 'STRIKE', `${COMBAT.playerStrikeDamage} damage · adjacent`, 'strike', () => this.selectAction('strike'));
     this.addButton(x, actionYs[2], width, height, 'KICK', 'Push · collision damage', 'kick', () => this.selectAction('kick'));
     this.addButton(x - width * 0.26, resetY, width * 0.46, resetHeight, 'END TURN', '', undefined, () => this.finishPlayerTurn());
     this.addButton(x + width * 0.26, resetY, width * 0.46, resetHeight, 'RESET', '', undefined, () => this.reset());
@@ -361,7 +361,14 @@ export class TacticalScene extends Phaser.Scene {
     }
 
     this.state = nextState;
-    if (this.state.moved && this.state.acted) this.state = endPlayerTurn(this.state);
+    if (this.state.moved && this.state.acted) {
+      // Render the resolved player action before consuming stun in the enemy
+      // phase. In particular, a move-then-kick must not erase its static stun
+      // marker in the same frame in which it is applied.
+      this.renderBoard();
+      await this.delay(420);
+      this.state = endPlayerTurn(this.state);
+    }
     this.selectedAction = this.state.acted ? 'move' : this.state.moved ? 'strike' : 'move';
     this.addHud();
     this.renderBoard();
@@ -369,18 +376,21 @@ export class TacticalScene extends Phaser.Scene {
     this.flushPendingLayout();
   }
 
-  private finishPlayerTurn(): void {
+  private async finishPlayerTurn(): Promise<void> {
     if (this.inputLocked) return;
-    const next = endPlayerTurn(this.state);
-    if (next === this.state) {
+    if (!this.state.moved && !this.state.acted) {
       this.setFeedback('Move or act before ending the turn.');
       return;
     }
-    this.state = next;
+    this.inputLocked = true;
+    await this.delay(420);
+    this.state = endPlayerTurn(this.state);
     this.selectedAction = 'move';
     this.setFeedback(this.state.lost ? 'The orcs bring you down.' : 'The orcs execute their shown intents.');
     this.addHud();
     this.renderBoard();
+    this.inputLocked = false;
+    this.flushPendingLayout();
   }
 
   private async animateMove(from: GridCoord, to: GridCoord): Promise<void> {
@@ -561,6 +571,10 @@ export class TacticalScene extends Phaser.Scene {
         },
       });
     });
+  }
+
+  private delay(duration: number): Promise<void> {
+    return new Promise((resolve) => this.time.delayedCall(duration, resolve));
   }
 
   private gridToWorld(coord: GridCoord): Phaser.Math.Vector2 {

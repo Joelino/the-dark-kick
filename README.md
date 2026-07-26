@@ -18,7 +18,7 @@ Use taps only; drag gestures are not required.
 
 - Each player turn allows one highlighted orthogonal **Move** and one **action** in either order. The action is either **Strike** or **Kick**; use **End Turn** to give up an unused move or action.
 - **Basic Strike** targets an orthogonally adjacent enemy and deals 1 damage.
-- **Kick** targets an orthogonally adjacent enemy. Open floor repositions it for 0 damage; a wall or board edge deals 1 collision damage and stuns it; colliding with another enemy stuns both and deals 1 to the pushed enemy; spikes deal 3 damage.
+- **Kick** targets an orthogonally adjacent enemy. Open floor repositions it for 0 damage; a wall or board edge deals 1 collision damage and stuns it; colliding with another enemy stuns both and deals 1 to the pushed enemy; a spike landing combines 1 impact damage with the 3 spike bonus and kills a full-health orc.
 - Each orc shows exactly one committed intent: a gold movement arrow or red attack marker. It then takes one action, moving along a deterministic shortest path or striking an adjacent player for 1 damage.
 - Stunned enemies show persistent gold stars, have no intent, and skip their next action.
 - Killing the enemy is optional; the level is completed by reaching the exit.
