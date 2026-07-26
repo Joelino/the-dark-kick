@@ -68,7 +68,7 @@ export const createTacticalLayout = (gameWidth: number): TacticalLayout => {
     : undefined;
   const logArea = logPanel
     ? { x: logPanel.x + 16, headingY: 43, bodyY: 72, width: logPanel.width - 32 }
-    : { x: hudPanel.x + 16, headingY: 448, bodyY: 472, width: hudPanel.width - 32 };
+    : { x: hudPanel.x + 16, headingY: 365, bodyY: 387, width: hudPanel.width - 32 };
 
   return {
     gameWidth: width,
@@ -89,10 +89,10 @@ export const createTacticalLayout = (gameWidth: number): TacticalLayout => {
     buttons: {
       x: hudPanel.x + hudPanel.width / 2,
       width: Math.min(320, hudPanel.width - 40),
-      height: 76,
-      actionYs: [138, 224, 310],
-      resetY: 398,
-      resetHeight: 46,
+      height: 60,
+      actionYs: [128, 194, 260],
+      resetY: 329,
+      resetHeight: 44,
     },
   };
 };
@@ -111,7 +111,7 @@ const createStandardLayout = (gameWidth: number): TacticalLayout => {
     gridOrigin: { x: 348, y: 88 },
     boardFrame,
     hudPanel,
-    logArea: { x: 36, headingY: 402, bodyY: 427, width: 238 },
+    logArea: { x: 36, headingY: 344, bodyY: 366, width: 238 },
     boardHeading: { x: 320, y: 24 },
     turn: { x: 856, y: 24 },
     title: { x: 36, y: 35 },
@@ -119,10 +119,10 @@ const createStandardLayout = (gameWidth: number): TacticalLayout => {
     buttons: {
       x: 154,
       width: 224,
-      height: 54,
-      actionYs: [146, 212, 278],
-      resetY: 350,
-      resetHeight: 42,
+      height: 48,
+      actionYs: [132, 188, 244],
+      resetY: 304,
+      resetHeight: 44,
     },
   };
 };
