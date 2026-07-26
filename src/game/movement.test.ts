@@ -52,6 +52,20 @@ describe('strict player and enemy turns', () => {
     expect(next.turn).toBe(2);
     expect(enemyAt(next, { col: 2, row: 2 })?.id).toBe('orc');
   });
+
+  it('keeps custom grid bounds when preparing the following turn', () => {
+    const grid = { columns: 3, rows: 1 };
+    const state = scenario({
+      player: { col: 2, row: 0 },
+      walls: [{ col: 1, row: 0 }],
+      enemies: [orc('orc', 0, 0)],
+    });
+
+    const next = endPlayerTurn(state, grid);
+
+    expect(enemyAt(next, { col: 0, row: 0 })?.id).toBe('orc');
+    expect(next.intents).toEqual([]);
+  });
 });
 
 describe('kick payoffs and stun', () => {
