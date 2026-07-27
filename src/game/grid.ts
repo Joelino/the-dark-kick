@@ -21,6 +21,14 @@ export const isInsideGrid = (coord: GridCoord, grid: GridSize = GRID_SIZE): bool
 export const manhattanDistance = (a: GridCoord, b: GridCoord): number =>
   Math.abs(a.col - b.col) + Math.abs(a.row - b.row);
 
+/** Stable exploration order used by movement, pathfinding, and level validation. */
+export const orthogonalNeighbors = (coord: GridCoord): readonly GridCoord[] => [
+  { col: coord.col, row: coord.row - 1 },
+  { col: coord.col - 1, row: coord.row },
+  { col: coord.col + 1, row: coord.row },
+  { col: coord.col, row: coord.row + 1 },
+];
+
 export const allGridCoords = (grid: GridSize = GRID_SIZE): GridCoord[] => {
   const coords: GridCoord[] = [];
 

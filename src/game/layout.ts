@@ -36,7 +36,7 @@ export interface TacticalLayout {
     readonly x: number;
     readonly width: number;
     readonly height: number;
-    readonly actionYs: readonly [number, number, number];
+    readonly actionYs: readonly [number, number, number, number];
     readonly resetY: number;
     readonly resetHeight: number;
   };
@@ -55,9 +55,9 @@ export const createTacticalLayout = (gameWidth: number): TacticalLayout => {
   if (width < 1080) return createStandardLayout(width);
 
   const boardFrame = {
-    x: Math.max(320, Math.round((width - 660) / 2)),
+    x: Math.max(320, Math.round((width - 620) / 2)),
     y: 28,
-    width: 660,
+    width: 620,
     height: 500,
   };
   const hudPanel = { x: 20, y: 18, width: boardFrame.x - 40, height: 504 };
@@ -69,15 +69,16 @@ export const createTacticalLayout = (gameWidth: number): TacticalLayout => {
   const logArea = logPanel
     ? { x: logPanel.x + 16, headingY: 43, bodyY: 72, width: logPanel.width - 32 }
     : { x: hudPanel.x + 16, headingY: 365, bodyY: 387, width: hudPanel.width - 32 };
+  const roomyActions = width >= 1150;
 
   return {
     gameWidth: width,
     shortLandscape: true,
     hasSeparateLogPanel,
-    tileSize: 76,
-    tileStep: 80,
-    spriteScale: 76 / 32,
-    gridOrigin: { x: boardFrame.x + 50, y: 78 },
+    tileSize: 72,
+    tileStep: 76,
+    spriteScale: 72 / 32,
+    gridOrigin: { x: boardFrame.x + 44, y: 78 },
     boardFrame,
     hudPanel,
     ...(logPanel ? { logPanel } : {}),
@@ -89,10 +90,10 @@ export const createTacticalLayout = (gameWidth: number): TacticalLayout => {
     buttons: {
       x: hudPanel.x + hudPanel.width / 2,
       width: Math.min(320, hudPanel.width - 40),
-      height: 60,
-      actionYs: [128, 194, 260],
-      resetY: 329,
-      resetHeight: 44,
+      height: roomyActions ? 60 : 46,
+      actionYs: roomyActions ? [126, 190, 254, 318] : [120, 170, 220, 270],
+      resetY: roomyActions ? 382 : 326,
+      resetHeight: roomyActions ? 48 : 44,
     },
   };
 };
@@ -119,9 +120,9 @@ const createStandardLayout = (gameWidth: number): TacticalLayout => {
     buttons: {
       x: 154,
       width: 224,
-      height: 48,
-      actionYs: [132, 188, 244],
-      resetY: 304,
+      height: 44,
+      actionYs: [118, 166, 214, 262],
+      resetY: 312,
       resetHeight: 44,
     },
   };
