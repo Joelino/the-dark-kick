@@ -92,9 +92,19 @@ card doesn't *grant* kick, it makes your kick *ignite* / *knock back further* /
 
 ## Platform & shape
 
-- Touch-first, tuned for **phone in landscape**. Readability on a small screen is
-  a hard constraint — it vetoes mechanics that need fine reading (this is why
-  true multi-floor verticality is parked).
+- **Primary target is desktop co-op.** The ideal session is an evening with one
+  or two friends over Discord, on laptop or PC. **Phone stays a first-class
+  playtest surface** — it's where stolen minutes of testing happen, and it's
+  where the core verb was proven — so the build must remain playable and
+  readable in phone landscape. But phone is no longer the thing every mechanic
+  is optimised *for*.
+  > *Changed 2026-07-26 (discussed, not assumed). Previously read: "Touch-first,
+  > tuned for phone in landscape. Readability on a small screen is a hard
+  > constraint — it vetoes mechanics that need fine reading." The practical
+  > effect: small-screen readability is now a **strong constraint** rather than
+  > an **absolute veto**. Mechanics needing finer reading — continuous aim in
+  > particular — are back on the table where they'd previously have been ruled
+  > out. Multi-floor verticality stays parked on its own merits.*
 - Grid tactics, square grid.
 - Built to be playable in short, decompressing sessions, ideally with **co-op**
   as a first-class future goal (co-op is a reason several mechanics earn their
