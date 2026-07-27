@@ -263,9 +263,10 @@ different tool they already have.
 **The baseline orc should need no tutorial.** It does the first thing a player
 expects an enemy in this kind of game to do: close on you and hit you. That's
 what buys us the attention budget to make *other* elements interesting. It gets
-**no action telegraph** (§2, Axiom 1). A lightweight **state tell** — idle vs
-pursuing — is worth having as readability insurance; it communicates a *mode*,
-never a stored plan.
+**no persistent mode badge and no action telegraph** (§2, Axiom 1). Instead,
+on-demand inspection derives its movement area, post-move attack area, and
+route to the player from the live board. That communicates the rule without
+turning a generic mode word into permanent visual clutter.
 
 **The committed-movement enemy** (new, from the M2 session) is the interesting
 counter to a fast player: it moves several tiles in a straight line and can only

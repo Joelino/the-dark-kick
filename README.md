@@ -2,28 +2,30 @@
 
 Touch-first tactical game interaction prototype.
 
-The current first-level rules are documented in [`LEVEL.md`](./LEVEL.md).
+The canonical first-level rules are documented in [`docs/LEVEL.md`](./docs/LEVEL.md).
 
 ## Current prototype
 
-The current build is a landscape-oriented Phaser 3 prototype with an 8-column by 6-row square grid. It is tuned for phone landscape play: the board fills most of the screen, the compact status and controls sit beside the board, page scrolling is disabled, and safe-area insets are respected. Short, wide browser viewports use a wider logical canvas with larger board tiles and controls; very wide layouts place combat feedback in a third column instead of leaving unused black space. Small portrait phones show a tasteful “Rotate device for the best experience” overlay instead of a cramped board.
+The current build is a landscape-oriented Phaser 3 prototype with an 8-column by 6-row square grid. It launches into a plain, scrollable tuning screen whose clamped −/+ steppers apply to the next run. The same home screen opens a touch level editor for painting Floor, Wall, Spikes, Exit, Player, and Orc tiles. Saving replaces one active browser-local level slot and exports `level.json`; every painted Orc spawns, and the conflicting Orc Count tuner is hidden for edited rooms. There is deliberately no level library yet. The game is tuned for phone landscape play: the board fills most of the screen, compact controls sit beside it, page scrolling is disabled during play, and safe-area insets are respected.
 
-A fighter starts near the left side of a 32rogues-styled dungeon board, an exit staircase sits near the right side, and two 4 HP orcs close in from near and far positions. Terrain and occupants are separate: the exit and spikes are traversable terrain, while walls and enemy occupants block movement.
+The bundled room remains a starting draft rather than a claimed final layout. The editor exists specifically so its wall mass, room silhouette, routes, hazards, and spawns can be changed through playtesting without another code edit. The map contract lives in [`docs/MAP_GENERATION.md`](./docs/MAP_GENERATION.md), and editor behavior is documented in [`docs/LEVEL_EDITOR.md`](./docs/LEVEL_EDITOR.md).
 
 The tactical readout opens on **Turn Order** as a top-to-bottom stack of portrait cards showing each unit's health and attack strength. The top card is the next unit to resolve, and cards leave the stack as the enemy phase advances. The player also has a health bar above their board sprite. A **Combat Log** tab keeps the latest four factual results without replacing the default unit overview. A small date-and-branch build label beneath the title makes deployed playtest versions easy to identify.
 
-Player and enemy movement and attacks use short squash-and-stretch action sequences. Enemy turns resolve one unit at a time with visible movement, strike, miss, wait, and stun-skip feedback. Hits add impact flashes, damage numbers, particles, and camera shake. Lethal hits collapse the enemy into a bloodied corpse that stays on its death tile for the rest of the run.
+Player and enemy movement and attacks use short squash-and-stretch action sequences. Enemy turns resolve live, one unit at a time, with visible movement, same-activation strikes, waits, and stun skips. Hits add impact flashes, damage numbers, particles, and camera shake. Lethal hits collapse the enemy into a bloodied corpse that stays on its death tile for the rest of the run. Power Strike adds a persistent tile marker and a distinct charge-step impact or intentional whiff.
 
 ## Controls and rules
 
 Use taps only; drag gestures are not required.
 
-- Each player turn allows one highlighted orthogonal **Move** and one **action** in either order. The action is either **Strike** or **Kick**; use **End Turn** to give up an unused move or action.
-- **Basic Strike** targets an orthogonally adjacent enemy and deals 1 damage.
+- Each player turn follows one order: optional movement, then an optional action. The movement overlay shows every tile reachable with the remaining points, and one tap can spend both points to follow a deterministic path. Taking any action immediately closes movement and starts the enemy phase; **End Turn** gives up anything unused.
+- **Basic Strike** targets an orthogonally adjacent enemy and deals 1 damage immediately.
 - **Kick** targets an orthogonally adjacent enemy. Open floor repositions it for 0 damage; a wall or board edge deals 1 collision damage and stuns it; colliding with another enemy stuns both and deals 1 to the pushed enemy; a spike landing combines 1 impact damage with the 3 spike bonus and kills a full-health orc.
-- Each orc shows exactly one committed intent: a gold movement arrow or a red outlined target tile labeled **ATTACK**. The marker disappears when that committed action resolves. The orc then takes one action, moving along a deterministic shortest path or striking an adjacent player for 1 damage.
+- **Power Strike** charges an adjacent tile for 3 damage. Its purple targeting overlay and persistent marker distinguish the charged action from green movement. After enemy activations it hits whatever occupies the tile in the charge step—or logs a whiff if it is empty.
+- Orcs never show or store an action plan. Hover an orc with a pointer, or tap it on mobile while it is not a legal action target, to inspect danger: bright solid red means move then Strike, while muted hatched red means Strike without moving. A route arrow identifies the player being pursued. On activation the orc reads the live board, moves up to its allowance, and immediately Strikes for 1 if it ends adjacent.
 - Spikes deal 3 damage whenever a player or enemy enters them. Orc pathfinding takes a safe route when one exists and crosses spikes only when no safe path is available. A forced spike Kick also includes its 1 impact damage, for 4 total.
-- Stunned enemies show persistent gold stars, have no intent, and skip their next action.
+- Stunned enemies show persistent gold stars and skip their next full activation. Existing charges survive stun.
+- Kick cooldown is tunable and defaults to off. At positive values its disabled control shows the remaining player turns.
 - Killing the enemy is optional; the level is completed by reaching the exit.
 
 After victory, board input is disabled and a **Level Complete** panel shows the number of turns used plus a **Play Again** button. **Play Again** and **Reset** restore the initial player position, enemy HP and position, turn count, and victory state.

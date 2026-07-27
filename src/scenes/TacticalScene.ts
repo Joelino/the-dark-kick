@@ -5,19 +5,25 @@ import { allGridCoords, coordsEqual, type GridCoord } from '../game/grid';
 import { createTacticalLayout, GAME_HEIGHT, MIN_GAME_WIDTH, type TacticalLayout } from '../game/layout';
 import {
   basicStrike,
+  chargeResolutionOrder,
+  declarePowerStrike,
+  enemyThreatPreview,
   enemyTurnOrder,
   finishEnemyTurn,
   kick,
   legalTargetsForAction,
-  movePlayer,
   resetGame,
+  resolveCharge,
   resolveEnemyAction,
+  resolvePlayerMove,
   terrainAt,
   type Action,
   type ActionResult,
+  type ChargeResolution,
   type EnemyActionResult,
+  type PlayerMoveResult,
 } from '../game/movement';
-import { type EnemyIntent, type GameState } from '../game/state';
+import { type Charge, type GameState } from '../game/state';
 
 const PLAYER_FRAME = 8;
 const ENEMY_FRAME = 0;
@@ -36,6 +42,7 @@ export class TacticalScene extends Phaser.Scene {
   private layout: TacticalLayout = createTacticalLayout(MIN_GAME_WIDTH);
   private selectedAction: Action = 'move';
   private tileLayer?: Phaser.GameObjects.Container;
+  private inspectionLayer?: Phaser.GameObjects.Container;
   private hudLayer?: Phaser.GameObjects.Container;
   private effectsLayer?: Phaser.GameObjects.Container;
   private turnText?: Phaser.GameObjects.Text;
@@ -48,6 +55,9 @@ export class TacticalScene extends Phaser.Scene {
   private panelTab: 'order' | 'log' = 'order';
   private combatLog: string[] = ['T1 Objective: reach the exit.'];
   private activeEnemyQueue?: readonly string[];
+  private resolvingCharges = false;
+  private hoveredEnemyId?: string;
+  private pinnedEnemyId?: string;
 
   constructor() {
     super('tactical-scene');
@@ -106,6 +116,7 @@ export class TacticalScene extends Phaser.Scene {
     this.highlightTween = undefined;
     this.children.removeAll(true);
     this.tileLayer = undefined;
+    this.inspectionLayer = undefined;
     this.hudLayer = undefined;
     this.effectsLayer = undefined;
     this.turnText = undefined;
@@ -159,7 +170,7 @@ export class TacticalScene extends Phaser.Scene {
 
     this.add.text(this.layout.title.x, this.layout.title.y, 'THE DARK KICK', smallCapsStyle(this.layout.shortLandscape ? 25 : 23, '#f0d69b')).setDepth(22);
     this.add.text(this.layout.subtitle.x, this.layout.subtitle.y, 'A ROOM IS A WEAPON', smallCapsStyle(this.layout.shortLandscape ? 12 : 11, '#8f7b64')).setDepth(22);
-    this.add.text(this.layout.subtitle.x, this.layout.subtitle.y + 18, `BUILD ${BUILD_LABEL}`, smallCapsStyle(10, '#6f6258')).setDepth(22);
+    this.add.text(this.layout.subtitle.x, this.layout.subtitle.y + 16, `BUILD ${BUILD_LABEL}`, smallCapsStyle(9, '#6f6258')).setDepth(22);
     this.add.text(logArea.x, logArea.headingY, 'TACTICAL READOUT', smallCapsStyle(this.layout.shortLandscape ? 12 : 11, '#8f7b64')).setDepth(22);
     this.add
       .text(this.layout.boardHeading.x, this.layout.boardHeading.y, 'THE FIRST CELLAR', smallCapsStyle(this.layout.shortLandscape ? 12 : 10, '#786959'))
@@ -172,9 +183,32 @@ export class TacticalScene extends Phaser.Scene {
     this.hudLayer = this.add.container(0, 0).setDepth(20);
 
     const { actionYs, height, resetHeight, resetY, width, x } = this.layout.buttons;
-    this.addButton(x, actionYs[0], width, height, 'MOVE', 'Step to an adjacent tile', 'move', () => this.selectAction('move'));
-    this.addButton(x, actionYs[1], width, height, 'STRIKE', `${COMBAT.playerStrikeDamage} damage · adjacent`, 'strike', () => this.selectAction('strike'));
-    this.addButton(x, actionYs[2], width, height, 'KICK', 'Push · collision damage', 'kick', () => this.selectAction('kick'));
+    this.addButton(
+      x,
+      actionYs[0],
+      width,
+      height,
+      'MOVE',
+      this.state.acted
+        ? 'Closed after action'
+        : `${this.state.movePointsRemaining} point${this.state.movePointsRemaining === 1 ? '' : 's'} left`,
+      'move',
+      () => this.selectAction('move'),
+    );
+    this.addButton(x, actionYs[1], width, height, 'STRIKE', `${COMBAT.strikeDamage} damage · adjacent`, 'strike', () => this.selectAction('strike'));
+    this.addButton(
+      x,
+      actionYs[2],
+      width,
+      height,
+      'KICK',
+      this.state.kickCooldownRemaining > 0
+        ? `Cooldown · ${this.state.kickCooldownRemaining} turn${this.state.kickCooldownRemaining === 1 ? '' : 's'}`
+        : 'Push · collision payoff',
+      'kick',
+      () => this.selectAction('kick'),
+    );
+    this.addButton(x, actionYs[3], width, height, 'POWER STRIKE', `${COMBAT.powerStrikeDamage} damage · charged tile`, 'power-strike', () => this.selectAction('power-strike'));
     this.addButton(x - width * 0.26, resetY, width * 0.46, resetHeight, 'END TURN', '', undefined, () => this.finishPlayerTurn());
     this.addButton(x + width * 0.26, resetY, width * 0.46, resetHeight, 'RESET', '', undefined, () => this.reset());
     const narrowReadout = this.layout.logArea.width < 180;
@@ -203,7 +237,7 @@ export class TacticalScene extends Phaser.Scene {
   }
 
   private addTurnOrderCards(): void {
-    const enemies = [...this.state.enemies].sort((a, b) => a.position.row - b.position.row || a.position.col - b.position.col);
+    const enemies = this.state.enemies;
     const queue = this.activeEnemyQueue
       ? this.activeEnemyQueue.map((id) => ({ kind: 'enemy' as const, id }))
       : [{ kind: 'player' as const, id: 'player' }, ...enemies.map((enemy) => ({ kind: 'enemy' as const, id: enemy.id }))];
@@ -233,22 +267,17 @@ export class TacticalScene extends Phaser.Scene {
 
       let name = 'YOU';
       let status = this.playerTurnStatus();
-      let stats = `HP ${this.state.playerHp}/${COMBAT.playerMaxHealth} · ATK ${COMBAT.playerStrikeDamage}`;
+      let stats = `HP ${this.state.playerHp}/${COMBAT.playerHealth} · ATK ${COMBAT.strikeDamage}`;
       if (entry.kind === 'enemy') {
         const enemy = this.state.enemies.find((candidate) => candidate.id === entry.id);
         if (!enemy) return;
-        const intent = this.state.intents.find((candidate) => candidate.enemyId === enemy.id);
         name = enemy.id === 'near-orc' ? (narrowCard ? 'NEAR' : 'NEAR ORC') : enemy.id === 'far-orc' ? (narrowCard ? 'FAR' : 'FAR ORC') : 'ORC';
-        stats = `HP ${enemy.hp}/${COMBAT.orcMaxHealth} · ATK ${COMBAT.orcStrikeDamage}`;
-        status = enemy.stunnedTurns > 0
+        stats = `HP ${enemy.hp}/${COMBAT.orcHealth} · ATK ${COMBAT.orcStrikeDamage}`;
+        status = enemy.stunnedActivations > 0
           ? narrowCard ? 'STUN · SKIP' : 'STUNNED · SKIPS'
-          : intent?.kind === 'attack'
-            ? narrowCard ? 'ATTACK YOU' : 'STRIKE → YOU'
-            : intent
-              ? narrowCard ? `MOVE ${intent.target.col},${intent.target.row}` : `MOVE → ${intent.target.col},${intent.target.row}`
-              : 'WAIT';
-      } else if (narrowCard && status === 'MOVE + ACTION') {
-        status = 'MOVE + ACT';
+          : narrowCard
+            ? `MOVE ${COMBAT.orcMovePoints} · ATK`
+            : `MOVE ${COMBAT.orcMovePoints} · STRIKE`;
       }
       if (!compact) name += `  ·  ${stats}`;
 
@@ -276,10 +305,9 @@ export class TacticalScene extends Phaser.Scene {
   }
 
   private playerTurnStatus(): string {
-    if (this.state.moved && this.state.acted) return 'TURN ENDING';
-    if (this.state.moved) return 'ACTION LEFT';
-    if (this.state.acted) return 'MOVE LEFT';
-    return 'MOVE + ACTION';
+    if (this.state.acted) return 'TURN ENDING';
+    if (this.state.movePointsRemaining === 0) return 'ACTION LEFT';
+    return `MOVE ${this.state.movePointsRemaining} → ACTION`;
   }
 
   private addButton(
@@ -292,7 +320,12 @@ export class TacticalScene extends Phaser.Scene {
     action: Action | undefined,
     onTap: () => void,
   ): void {
-    const completed = action === 'move' ? this.state.moved : action !== undefined ? this.state.acted : false;
+    const coolingDown = action === 'kick' && this.state.kickCooldownRemaining > 0;
+    const completed = action === 'move'
+      ? this.state.movePointsRemaining === 0 || this.state.acted
+      : action !== undefined
+        ? this.state.acted || coolingDown
+        : false;
     const active = !completed && action === this.selectedAction;
     const button = this.add
       .rectangle(x, y, width, height, completed ? 0x171316 : active ? 0x5d3c20 : 0x21191c, 1)
@@ -301,7 +334,12 @@ export class TacticalScene extends Phaser.Scene {
     const centeredLabel = detail.length === 0;
     const labelSize = centeredLabel ? (this.layout.shortLandscape ? 15 : 14) : this.layout.shortLandscape ? 19 : 17;
     const text = this.add
-      .text(centeredLabel ? x : x - width / 2 + 17, labelY, `${label}${completed ? '  ✓' : ''}`, smallCapsStyle(labelSize, completed ? '#71686a' : active ? '#ffe0a1' : '#e4d9ca'))
+      .text(
+        centeredLabel ? x : x - width / 2 + 17,
+        labelY,
+        `${label}${completed && !coolingDown ? '  ✓' : ''}`,
+        smallCapsStyle(labelSize, completed ? '#71686a' : active ? '#ffe0a1' : '#e4d9ca'),
+      )
       .setOrigin(centeredLabel ? 0.5 : 0, 0.5);
     const detailText = detail
       ? this.add.text(x - width / 2 + 17, y + 13, detail, bodyStyle(this.layout.shortLandscape ? 13 : 11, completed ? '#5f585a' : active ? '#dcb875' : '#8f8580')).setOrigin(0, 0.5)
@@ -329,8 +367,11 @@ export class TacticalScene extends Phaser.Scene {
       this.state.won ||
       this.state.lost ||
       this.inputLocked ||
-      (action === 'move' ? this.state.moved : this.state.acted)
+      (action === 'move' ? this.state.movePointsRemaining === 0 || this.state.acted : this.state.acted) ||
+      (action === 'kick' && this.state.kickCooldownRemaining > 0)
     ) return;
+    this.hoveredEnemyId = undefined;
+    this.pinnedEnemyId = undefined;
     this.selectedAction = action;
     this.addHud();
     this.renderBoard();
@@ -344,6 +385,9 @@ export class TacticalScene extends Phaser.Scene {
     this.panelTab = 'order';
     this.combatLog = ['T1 Objective: reach the exit.'];
     this.activeEnemyQueue = undefined;
+    this.resolvingCharges = false;
+    this.hoveredEnemyId = undefined;
+    this.pinnedEnemyId = undefined;
     this.addHud();
     this.renderBoard();
   }
@@ -351,11 +395,14 @@ export class TacticalScene extends Phaser.Scene {
   private renderBoard(): void {
     this.highlightTween?.stop();
     this.highlightTween = undefined;
+    this.inspectionLayer?.destroy(true);
+    this.inspectionLayer = undefined;
     this.tileLayer?.destroy(true);
     this.tileLayer = this.add.container(0, 0).setDepth(10);
     this.enemySprites.clear();
     this.playerSprite = undefined;
-    this.turnText?.setText(`TURN ${this.state.turn}  ·  ${this.activeEnemyQueue ? 'ENEMIES' : 'YOU'}  ·  HP ${this.state.playerHp}/${COMBAT.playerMaxHealth}`);
+    const phase = this.resolvingCharges ? 'CHARGES' : this.activeEnemyQueue ? 'ENEMIES' : 'YOU';
+    this.turnText?.setText(`TURN ${this.state.turn}  ·  ${phase}  ·  HP ${this.state.playerHp}/${COMBAT.playerHealth}`);
     this.renderInfoPanel();
     const { spriteScale, tileSize } = this.layout;
 
@@ -391,7 +438,17 @@ export class TacticalScene extends Phaser.Scene {
 
       const legal = legalTargets.some((target) => coordsEqual(target, coord));
       if (legal) {
-        const highlight = this.add.rectangle(position.x, position.y, tileSize - 4, tileSize - 4, 0x6fbd62, 0.16).setStrokeStyle(3, 0xa9e68f, 0.9);
+        const powerTarget = this.selectedAction === 'power-strike';
+        const highlight = this.add
+          .rectangle(
+            position.x,
+            position.y,
+            tileSize - 4,
+            tileSize - 4,
+            powerTarget ? 0x8e5bd4 : 0x6fbd62,
+            powerTarget ? 0.2 : 0.16,
+          )
+          .setStrokeStyle(3, powerTarget ? 0xe2c1ff : 0xa9e68f, 0.9);
         this.tileLayer.add(highlight);
         highlights.push(highlight);
       }
@@ -402,9 +459,12 @@ export class TacticalScene extends Phaser.Scene {
     }
 
     for (const corpse of this.state.corpses) this.addCorpse(corpse.position, corpse.enemyId);
-    for (const enemy of this.state.enemies) this.addEnemy(enemy.id, enemy.position, enemy.hp, enemy.stunnedTurns > 0);
+    for (const charge of this.state.charges) this.addChargeMarker(charge);
+    for (const enemy of this.state.enemies) {
+      this.addEnemy(enemy.id, enemy.position, enemy.hp, enemy.stunnedActivations > 0);
+    }
     this.addPlayer(this.state.player);
-    for (const intent of this.state.intents) this.addIntent(intent);
+    this.renderEnemyInspection();
 
     if (this.state.won || this.state.lost) this.showEndPanel();
   }
@@ -423,30 +483,22 @@ export class TacticalScene extends Phaser.Scene {
     this.tileLayer?.add([blood, corpse]);
   }
 
-  private addIntent(intent: EnemyIntent): void {
-    const enemy = this.state.enemies.find((candidate) => candidate.id === intent.enemyId);
-    if (!enemy) return;
-    const from = this.gridToWorld(enemy.position);
-    const to = this.gridToWorld(intent.target);
-    if (intent.kind === 'attack') {
-      const { tileSize } = this.layout;
-      const target = this.add
-        .rectangle(to.x, to.y, tileSize - 8, tileSize - 8, 0xa5262e, 0.08)
-        .setStrokeStyle(3, 0xff655f, 0.9);
-      const badge = this.add
-        .rectangle(to.x, to.y + tileSize * 0.41, Math.min(58, tileSize - 10), 15, 0x56151b, 0.96)
-        .setStrokeStyle(1, 0xff8a7c, 0.95);
-      const label = this.add.text(to.x, badge.y, 'ATTACK', smallCapsStyle(this.layout.shortLandscape ? 9 : 8, '#ffd0be')).setOrigin(0.5);
-      this.tileLayer?.add([target, badge, label]);
-      return;
-    }
-
-    const marker = this.add
-      .text((from.x + to.x) / 2, (from.y + to.y) / 2, '➜', smallCapsStyle(30, '#f0b85c'))
-      .setOrigin(0.5)
-      .setAngle(Phaser.Math.RadToDeg(Math.atan2(to.y - from.y, to.x - from.x)))
-      .setAlpha(0.92);
-    this.tileLayer?.add(marker);
+  private addChargeMarker(charge: Charge): void {
+    const world = this.gridToWorld(charge.target);
+    const { tileSize } = this.layout;
+    const playerCharge = charge.actorSide === 'player';
+    const target = this.add
+      .rectangle(world.x, world.y, tileSize - 8, tileSize - 8, playerCharge ? 0x8459c9 : 0xa5262e, 0.14)
+      .setStrokeStyle(3, playerCharge ? 0xd8b4ff : 0xff655f, 0.95);
+    const crossA = this.add.rectangle(world.x, world.y, 4, tileSize * 0.72, playerCharge ? 0xe6c5ff : 0xff8a7c, 0.82).setAngle(45);
+    const crossB = this.add.rectangle(world.x, world.y, 4, tileSize * 0.72, playerCharge ? 0xe6c5ff : 0xff8a7c, 0.82).setAngle(-45);
+    const badge = this.add
+      .rectangle(world.x, world.y + tileSize * 0.39, Math.min(66, tileSize - 8), 16, playerCharge ? 0x382153 : 0x56151b, 0.98)
+      .setStrokeStyle(1, playerCharge ? 0xd8b4ff : 0xff8a7c, 0.95);
+    const label = this.add
+      .text(world.x, badge.y, `POWER · T${charge.resolveOnRound}`, smallCapsStyle(this.layout.shortLandscape ? 8 : 7, '#f4deff'))
+      .setOrigin(0.5);
+    this.tileLayer?.add([target, crossA, crossB, badge, label]);
   }
 
   private addEnemy(id: string, position: GridCoord, hp: number, stunned: boolean): void {
@@ -456,11 +508,30 @@ export class TacticalScene extends Phaser.Scene {
     const shadow = this.add.ellipse(world.x, world.y + tileSize * 0.34, tileSize * 0.625, tileSize * 0.2, 0x050405, 0.7);
     const sprite = this.add.sprite(world.x, world.y - 2, 'monsters', ENEMY_FRAME).setScale(spriteScale);
     const hpBack = this.add.rectangle(world.x, world.y - tileSize * 0.45, hpWidth, 7, 0x150e11, 0.95).setStrokeStyle(1, 0x5f3f43);
-    const hpFill = this.add.rectangle(world.x - hpWidth / 2 + 1, world.y - tileSize * 0.45, ((hpWidth - 2) * hp) / COMBAT.orcMaxHealth, 5, 0xb5413f, 1).setOrigin(0, 0.5);
+    const hpFill = this.add.rectangle(world.x - hpWidth / 2 + 1, world.y - tileSize * 0.45, ((hpWidth - 2) * hp) / COMBAT.orcHealth, 5, 0xb5413f, 1).setOrigin(0, 0.5);
     const hitArea = this.add.rectangle(world.x, world.y, tileSize, tileSize, 0xffffff, 0.001);
     hitArea.setInteractive({ useHandCursor: true });
+    hitArea.on('pointerover', () => {
+      if (this.inputLocked) return;
+      this.hoveredEnemyId = id;
+      this.renderEnemyInspection();
+    });
+    hitArea.on('pointerout', () => {
+      if (this.hoveredEnemyId !== id) return;
+      this.hoveredEnemyId = undefined;
+      this.renderEnemyInspection();
+    });
     hitArea.on('pointerup', () => {
-      void this.handleTileTap(position);
+      const targetable =
+        this.selectedAction !== 'move' &&
+        legalTargetsForAction(this.state, this.selectedAction).some((target) => coordsEqual(target, position));
+      if (targetable) {
+        void this.handleTileTap(position);
+        return;
+      }
+      this.hoveredEnemyId = undefined;
+      this.pinnedEnemyId = this.pinnedEnemyId === id ? undefined : id;
+      this.renderEnemyInspection();
     });
     this.enemySprites.set(id, sprite);
     this.tileLayer?.add([shadow, sprite, hpBack, hpFill, hitArea]);
@@ -468,6 +539,96 @@ export class TacticalScene extends Phaser.Scene {
       const marker = this.add.text(world.x, world.y - tileSize * 0.25, '★  ★', smallCapsStyle(18, '#ffe36e')).setOrigin(0.5).setStroke('#3a2700', 4);
       this.tileLayer?.add(marker);
     }
+  }
+
+  private renderEnemyInspection(): void {
+    this.inspectionLayer?.destroy(true);
+    this.inspectionLayer = undefined;
+    const enemyId = this.hoveredEnemyId ?? this.pinnedEnemyId;
+    if (!enemyId || this.state.won || this.state.lost) return;
+
+    const enemy = this.state.enemies.find((candidate) => candidate.id === enemyId);
+    const preview = enemyThreatPreview(this.state, enemyId);
+    if (!enemy || !preview) {
+      if (this.pinnedEnemyId === enemyId) this.pinnedEnemyId = undefined;
+      if (this.hoveredEnemyId === enemyId) this.hoveredEnemyId = undefined;
+      return;
+    }
+
+    const layer = this.add.container(0, 0).setDepth(12);
+    this.inspectionLayer = layer;
+    const { tileSize } = this.layout;
+
+    for (const tile of preview.attackOnlyTiles) {
+      const world = this.gridToWorld(tile);
+      const targetsPlayer = coordsEqual(tile, this.state.player);
+      const direct = this.add
+        .rectangle(world.x, world.y, tileSize - 10, tileSize - 10, 0x9f4545, targetsPlayer ? 0.19 : 0.09)
+        .setStrokeStyle(targetsPlayer ? 3 : 2, targetsPlayer ? 0xe07a73 : 0xa85f5b, targetsPlayer ? 0.9 : 0.66);
+      const hatch = this.add.graphics();
+      hatch.lineStyle(2, targetsPlayer ? 0xef9b92 : 0xb56c67, targetsPlayer ? 0.78 : 0.52);
+      for (let line = -1; line <= 1; line += 1) {
+        hatch.lineBetween(
+          world.x - 12 + line * 10,
+          world.y + 14,
+          world.x + 2 + line * 10,
+          world.y - 14,
+        );
+      }
+      layer.add([direct, hatch]);
+    }
+    for (const tile of preview.moveThenAttackTiles) {
+      const world = this.gridToWorld(tile);
+      const targetsPlayer = coordsEqual(tile, this.state.player);
+      layer.add(
+        this.add
+          .rectangle(world.x, world.y, tileSize - 8, tileSize - 8, 0xe23f39, targetsPlayer ? 0.3 : 0.2)
+          .setStrokeStyle(targetsPlayer ? 4 : 3, targetsPlayer ? 0xff8b82 : 0xff5d54, 0.95),
+      );
+    }
+
+    const route = [enemy.position, ...preview.approachPath, this.state.player];
+    const uniqueRoute = route.filter((coord, index) => index === 0 || !coordsEqual(coord, route[index - 1]));
+    if (uniqueRoute.length > 1) {
+      const line = this.add.graphics();
+      line.lineStyle(4, 0xff655f, 0.92);
+      line.beginPath();
+      const start = this.gridToWorld(uniqueRoute[0]);
+      line.moveTo(start.x, start.y);
+      for (const coord of uniqueRoute.slice(1)) {
+        const point = this.gridToWorld(coord);
+        line.lineTo(point.x, point.y);
+      }
+      line.strokePath();
+      layer.add(line);
+
+      const previous = this.gridToWorld(uniqueRoute.at(-2)!);
+      const target = this.gridToWorld(uniqueRoute.at(-1)!);
+      const angle = Phaser.Math.Angle.Between(previous.x, previous.y, target.x, target.y);
+      const arrow = this.add
+        .text(
+          Phaser.Math.Linear(previous.x, target.x, 0.76),
+          Phaser.Math.Linear(previous.y, target.y, 0.76),
+          '➜',
+          smallCapsStyle(Math.max(18, Math.round(tileSize * 0.36)), '#ff8f86'),
+        )
+        .setOrigin(0.5)
+        .setRotation(angle);
+      layer.add(arrow);
+    }
+
+    const enemyWorld = this.gridToWorld(enemy.position);
+    const title = this.add
+      .text(
+        enemyWorld.x,
+        enemyWorld.y + tileSize * 0.38,
+        'BRIGHT MOVE+HIT · HATCH HIT',
+        smallCapsStyle(this.layout.shortLandscape ? 8 : 7, '#ffb1a8'),
+      )
+      .setOrigin(0.5)
+      .setBackgroundColor(preview.attacksPlayerThisActivation ? '#591b20' : '#421b1d')
+      .setPadding(5, 3);
+    layer.add(title);
   }
 
   private addPlayer(position: GridCoord): void {
@@ -479,38 +640,53 @@ export class TacticalScene extends Phaser.Scene {
     this.playerSprite = this.add.sprite(world.x, world.y - 2, 'rogues', PLAYER_FRAME).setScale(spriteScale);
     const hpBack = this.add.rectangle(world.x, world.y - tileSize * 0.45, hpWidth, 7, 0x0b1112, 0.95).setStrokeStyle(1, 0x3f625d);
     const hpFill = this.add
-      .rectangle(world.x - hpWidth / 2 + 1, world.y - tileSize * 0.45, ((hpWidth - 2) * this.state.playerHp) / COMBAT.playerMaxHealth, 5, 0x5aa58e, 1)
+      .rectangle(world.x - hpWidth / 2 + 1, world.y - tileSize * 0.45, ((hpWidth - 2) * this.state.playerHp) / COMBAT.playerHealth, 5, 0x5aa58e, 1)
       .setOrigin(0, 0.5);
     this.tileLayer?.add([shadow, ring, this.playerSprite, hpBack, hpFill]);
   }
 
   private async handleTileTap(coord: GridCoord): Promise<void> {
-    if (this.state.won || this.inputLocked) return;
+    if (this.state.won || this.state.lost || this.inputLocked) return;
 
     const before = this.state;
     const action = this.selectedAction;
     let result: ActionResult | undefined;
+    let movement: PlayerMoveResult | undefined;
     let nextState = before;
 
-    if (action === 'move') nextState = movePlayer(before, coord);
+    if (action === 'move') {
+      movement = resolvePlayerMove(before, coord);
+      nextState = movement.state;
+    }
     if (action === 'strike') result = basicStrike(before, coord);
     if (action === 'kick') result = kick(before, coord);
+    if (action === 'power-strike') result = declarePowerStrike(before, coord);
     if (result) nextState = result.state;
     if (nextState === before) return;
 
     this.inputLocked = true;
-    if (action === 'move') {
-      const spikeDamage = before.playerHp - nextState.playerHp;
+    this.hoveredEnemyId = undefined;
+    this.pinnedEnemyId = undefined;
+    this.inspectionLayer?.destroy(true);
+    this.inspectionLayer = undefined;
+    if (action === 'move' && movement) {
       this.appendCombatLog(
         nextState.won
           ? 'You: exit reached.'
-          : `You: move to ${coord.col},${coord.row}${spikeDamage > 0 ? ` · ${spikeDamage} spike damage` : ''}.`,
+          : `You: move ${movement.path.length} tile${movement.path.length === 1 ? '' : 's'} to ${coord.col},${coord.row}${movement.damageAmount > 0 ? ` · ${movement.damageAmount} spike damage` : ''}.`,
       );
-      await this.animateMove(before.player, coord);
-      if (spikeDamage > 0 && this.playerSprite) {
-        await this.animatePlayerHit(this.playerSprite, this.gridToWorld(coord), spikeDamage);
+      await this.animateMove(before.player, movement.path);
+      if (movement.damageAmount > 0 && this.playerSprite) {
+        await this.animatePlayerHit(
+          this.playerSprite,
+          this.gridToWorld(movement.path.at(-1) ?? before.player),
+          movement.damageAmount,
+        );
       }
-    } else if (result) {
+    } else if (action === 'power-strike' && result?.declaredCharge) {
+      this.appendCombatLog(`You: Power Strike charged at ${coord.col},${coord.row}.`);
+      await this.animateChargeDeclaration(coord);
+    } else if (result && (action === 'strike' || action === 'kick')) {
       this.appendCombatLog(
         action === 'strike'
           ? `You: strike · ${result.damageAmount} damage${result.killed ? ' · kill' : ''}.`
@@ -520,15 +696,14 @@ export class TacticalScene extends Phaser.Scene {
     }
 
     this.state = nextState;
-    if (this.state.moved && this.state.acted && !this.state.won && !this.state.lost) {
-      // Render the resolved player action before consuming stun in the enemy
-      // phase. In particular, a move-then-kick must not erase its static stun
-      // marker in the same frame in which it is applied.
+    if (action !== 'move' && !this.state.won && !this.state.lost) {
+      // Every action closes the ordered player phase: optional movement first,
+      // then at most one action. Render its result before enemies activate.
       this.renderBoard();
       await this.delay(280);
       await this.playEnemyTurn();
     }
-    this.selectedAction = this.state.acted ? 'move' : this.state.moved ? 'strike' : 'move';
+    this.selectedAction = this.state.movePointsRemaining === 0 && !this.state.acted ? 'strike' : 'move';
     this.addHud();
     this.renderBoard();
     this.inputLocked = false;
@@ -548,6 +723,10 @@ export class TacticalScene extends Phaser.Scene {
   }
 
   private async playEnemyTurn(): Promise<void> {
+    this.hoveredEnemyId = undefined;
+    this.pinnedEnemyId = undefined;
+    this.inspectionLayer?.destroy(true);
+    this.inspectionLayer = undefined;
     const queue = [...enemyTurnOrder(this.state)];
     this.activeEnemyQueue = queue;
     this.addHud();
@@ -566,24 +745,49 @@ export class TacticalScene extends Phaser.Scene {
       await this.delay(110);
     }
 
-    this.state = finishEnemyTurn(this.state);
     this.activeEnemyQueue = undefined;
+    if (!this.state.lost) await this.playChargeStep();
+    this.state = finishEnemyTurn(this.state);
+  }
+
+  private async playChargeStep(): Promise<void> {
+    const queue = [...chargeResolutionOrder(this.state)];
+    if (queue.length === 0) return;
+    this.resolvingCharges = true;
+    this.addHud();
+    this.renderBoard();
+
+    for (const chargeId of queue) {
+      const resolution = resolveCharge(this.state, chargeId);
+      if (!resolution) continue;
+      await this.animateChargeResolution(resolution);
+      this.state = resolution.state;
+      this.appendCombatLog(
+        resolution.whiffed
+          ? `You: Power Strike resolves at ${resolution.charge.target.col},${resolution.charge.target.row} · whiff.`
+          : `${resolution.charge.actorSide === 'player' ? 'You' : 'Orc'}: Power Strike · ${resolution.damageAmount} damage${resolution.killed ? ' · kill' : ''}.`,
+      );
+      this.renderBoard();
+      if (this.state.lost) break;
+      await this.delay(100);
+    }
+    this.resolvingCharges = false;
   }
 
   private appendEnemyAction(result: EnemyActionResult): void {
     const name = result.enemyId === 'near-orc' ? 'Near Orc' : result.enemyId === 'far-orc' ? 'Far Orc' : 'Orc';
     if (result.kind === 'attack') {
-      this.appendCombatLog(`${name}: strike · ${result.damageAmount} damage · you have ${result.state.playerHp}/${COMBAT.playerMaxHealth} HP.`);
+      const move = result.path.length > 0
+        ? `move to ${result.path.at(-1)!.col},${result.path.at(-1)!.row} · `
+        : '';
+      this.appendCombatLog(`${name}: ${move}strike · ${result.damageAmount} damage · you have ${result.state.playerHp}/${COMBAT.playerHealth} HP.`);
       return;
     }
-    if (result.kind === 'move' && result.target) {
+    if (result.kind === 'move' && result.path.length > 0) {
+      const destination = result.path.at(-1)!;
       this.appendCombatLog(
-        `${name}: move to ${result.target.col},${result.target.row}${result.damageAmount > 0 ? ` · ${result.damageAmount} spike damage` : ''}${result.killed ? ' · dies' : ''}.`,
+        `${name}: move to ${destination.col},${destination.row}${result.hazardDamage > 0 ? ` · ${result.hazardDamage} spike damage` : ''}${result.killed ? ' · dies' : ''}.`,
       );
-      return;
-    }
-    if (result.kind === 'miss') {
-      this.appendCombatLog(`${name}: strikes your old position · misses.`);
       return;
     }
     if (result.kind === 'stunned') {
@@ -593,26 +797,30 @@ export class TacticalScene extends Phaser.Scene {
     this.appendCombatLog(`${name}: blocked · waits.`);
   }
 
-  private async animateMove(from: GridCoord, to: GridCoord): Promise<void> {
+  private async animateMove(from: GridCoord, path: readonly GridCoord[]): Promise<void> {
     if (!this.playerSprite) return;
     const sprite = this.playerSprite;
     const scale = this.layout.spriteScale;
-    const start = this.gridToWorld(from);
-    const end = this.gridToWorld(to);
-    sprite.setFlipX(to.col < from.col);
+    let current = from;
+    for (const destination of path) {
+      const start = this.gridToWorld(current);
+      const end = this.gridToWorld(destination);
+      sprite.setFlipX(destination.col < current.col);
 
-    await this.tween({
-      targets: sprite,
-      x: Phaser.Math.Linear(start.x, end.x, 0.52),
-      y: Phaser.Math.Linear(start.y, end.y, 0.52) - 10,
-      scaleX: scale * 0.91,
-      scaleY: scale * 1.09,
-      duration: 80,
-      ease: 'Quad.Out',
-    });
-    await this.tween({ targets: sprite, x: end.x, y: end.y - 2, scaleX: scale * 1.06, scaleY: scale * 0.94, duration: 92, ease: 'Quad.In' });
-    await this.tween({ targets: sprite, scaleX: scale, scaleY: scale, duration: 55, ease: 'Back.Out' });
-    this.spawnDust(end.x, end.y + 23);
+      await this.tween({
+        targets: sprite,
+        x: Phaser.Math.Linear(start.x, end.x, 0.52),
+        y: Phaser.Math.Linear(start.y, end.y, 0.52) - 10,
+        scaleX: scale * 0.91,
+        scaleY: scale * 1.09,
+        duration: 80,
+        ease: 'Quad.Out',
+      });
+      await this.tween({ targets: sprite, x: end.x, y: end.y - 2, scaleX: scale * 1.06, scaleY: scale * 0.94, duration: 92, ease: 'Quad.In' });
+      await this.tween({ targets: sprite, scaleX: scale, scaleY: scale, duration: 55, ease: 'Back.Out' });
+      this.spawnDust(end.x, end.y + 23);
+      current = destination;
+    }
   }
 
   private async animateEnemyAction(result: EnemyActionResult): Promise<void> {
@@ -633,10 +841,11 @@ export class TacticalScene extends Phaser.Scene {
       return;
     }
 
-    if (result.kind === 'move' && result.target) {
-      const start = this.gridToWorld(result.from);
-      const end = this.gridToWorld(result.target);
-      sprite.setFlipX(result.target.col < result.from.col);
+    let current = result.from;
+    for (const destination of result.path) {
+      const start = this.gridToWorld(current);
+      const end = this.gridToWorld(destination);
+      sprite.setFlipX(destination.col < current.col);
       await this.tween({
         targets: sprite,
         x: Phaser.Math.Linear(start.x, end.x, 0.52),
@@ -649,12 +858,18 @@ export class TacticalScene extends Phaser.Scene {
       await this.tween({ targets: sprite, x: end.x, y: end.y - 2, scaleX: scale * 1.06, scaleY: scale * 0.94, duration: 115, ease: 'Quad.In' });
       await this.tween({ targets: sprite, scaleX: scale, scaleY: scale, duration: 55, ease: 'Back.Out' });
       this.spawnDust(end.x, end.y + 23);
-      if (result.damageAmount > 0) await this.animateHit(sprite, end, result.damageAmount, result.killed !== undefined);
+      current = destination;
+    }
+
+    if (result.hazardDamage > 0) {
+      await this.animateHit(sprite, this.gridToWorld(current), result.hazardDamage, result.killed !== undefined);
+    }
+    if (result.kind === 'move') {
       return;
     }
 
     if (!result.target) return;
-    const start = this.gridToWorld(result.from);
+    const start = this.gridToWorld(current);
     const target = this.gridToWorld(result.target);
     const dx = target.x - start.x;
     const dy = target.y - start.y;
@@ -680,12 +895,10 @@ export class TacticalScene extends Phaser.Scene {
       duration: 92,
       ease: 'Cubic.In',
     });
-    this.spawnEnemySlash(target, result.kind === 'miss');
-    this.cameras.main.shake(result.kind === 'attack' ? 92 : 55, result.kind === 'attack' ? 0.003 : 0.0015);
-    if (result.kind === 'attack' && this.playerSprite) {
+    this.spawnEnemySlash(target, false);
+    this.cameras.main.shake(92, 0.003);
+    if (this.playerSprite) {
       await this.animatePlayerHit(this.playerSprite, target, result.damageAmount);
-    } else {
-      await this.delay(90);
     }
     await this.tween({ targets: sprite, x: start.x, y: start.y - 2, angle: 0, scaleX: scale, scaleY: scale, duration: 135, ease: 'Back.Out' });
   }
@@ -704,7 +917,47 @@ export class TacticalScene extends Phaser.Scene {
     sprite.setPosition(position.x, position.y - 2).setScale(scale);
   }
 
-  private async animateAttack(action: Exclude<Action, 'move'>, before: GameState, target: GridCoord, result: ActionResult): Promise<void> {
+  private async animateChargeDeclaration(target: GridCoord): Promise<void> {
+    const position = this.gridToWorld(target);
+    const ring = this.add.circle(position.x, position.y, 9, 0xb77bea, 0.08).setStrokeStyle(4, 0xe4c3ff, 0.95);
+    const cross = this.add.text(position.x, position.y, '×', smallCapsStyle(34, '#f0d9ff')).setOrigin(0.5);
+    this.effectsLayer?.add([ring, cross]);
+    await this.tween({ targets: [ring, cross], scale: 1.75, alpha: 0.3, duration: 230, ease: 'Back.Out' });
+    ring.destroy();
+    cross.destroy();
+  }
+
+  private async animateChargeResolution(resolution: ChargeResolution): Promise<void> {
+    const position = this.gridToWorld(resolution.charge.target);
+    const blast = this.add.circle(position.x, position.y, 8, 0xd5a5ff, 0.2).setStrokeStyle(6, 0xf0d9ff, 1);
+    const crossA = this.add.rectangle(position.x, position.y, 7, this.layout.tileSize * 0.9, 0xe4c3ff, 0.95).setAngle(45);
+    const crossB = this.add.rectangle(position.x, position.y, 7, this.layout.tileSize * 0.9, 0xe4c3ff, 0.95).setAngle(-45);
+    this.effectsLayer?.add([blast, crossA, crossB]);
+    this.cameras.main.shake(resolution.whiffed ? 60 : 120, resolution.whiffed ? 0.0015 : 0.004);
+    void this.tween({
+      targets: [blast, crossA, crossB],
+      scale: 1.45,
+      alpha: 0,
+      duration: 260,
+      ease: 'Quad.Out',
+      onComplete: () => [blast, crossA, crossB].forEach((object) => object.destroy()),
+    });
+
+    if (resolution.whiffed) {
+      const whiff = this.add.text(position.x, position.y - 18, 'WHIFF', smallCapsStyle(16, '#d7c3df')).setOrigin(0.5);
+      this.effectsLayer?.add(whiff);
+      await this.tween({ targets: whiff, y: position.y - 52, alpha: 0, duration: 360, ease: 'Quad.Out', onComplete: () => whiff.destroy() });
+      return;
+    }
+    if (resolution.hitSide === 'player' && this.playerSprite) {
+      await this.animatePlayerHit(this.playerSprite, position, resolution.damageAmount);
+      return;
+    }
+    const enemySprite = resolution.hitUnitId ? this.enemySprites.get(resolution.hitUnitId) : undefined;
+    if (enemySprite) await this.animateHit(enemySprite, position, resolution.damageAmount, resolution.killed !== undefined);
+  }
+
+  private async animateAttack(action: 'strike' | 'kick', before: GameState, target: GridCoord, result: ActionResult): Promise<void> {
     const player = this.playerSprite;
     const enemy = before.enemies.find((candidate) => coordsEqual(candidate.position, target));
     const enemySprite = enemy ? this.enemySprites.get(enemy.id) : undefined;
@@ -794,7 +1047,7 @@ export class TacticalScene extends Phaser.Scene {
     }
   }
 
-  private spawnSlash(position: Phaser.Math.Vector2, action: Exclude<Action, 'move'>): void {
+  private spawnSlash(position: Phaser.Math.Vector2, action: 'strike' | 'kick'): void {
     const color = action === 'kick' ? 0xffb84d : 0xffedbd;
     const slash = this.add.rectangle(position.x, position.y, action === 'kick' ? 8 : 5, action === 'kick' ? 54 : 62, color, 0.95).setAngle(action === 'kick' ? 72 : 42);
     const echo = this.add.rectangle(position.x, position.y, 3, 44, 0xffffff, 0.78).setAngle(action === 'kick' ? 62 : -38);
